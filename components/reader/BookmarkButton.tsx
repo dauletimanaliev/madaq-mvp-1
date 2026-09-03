@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { addBookmark } from "@/app/books/[bookId]/read/actions";
 
 export function BookmarkButton({
@@ -18,29 +18,30 @@ export function BookmarkButton({
 }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
-
   const handleAddBookmark = () => {
-    // 1. Мгновенная реакция UI (0 мс)
+    // Update the button before the network roundtrip to Vercel and Supabase.
     setSaved(true);
     setError(null);
 
-    // 2. Асинхронное сохранение на сервере
-    startTransition(async () => {
-      const bookmark = await addBookmark({
-        bookId,
-        bookTitle,
-        chapterId,
-        chapterNumber,
-        position,
-        note: null,
-      });
+    void (async () => {
+      try {
+        const bookmark = await addBookmark({
+          bookId,
+          bookTitle,
+          chapterId,
+          chapterNumber,
+          position,
+          note: null,
+        });
 
-      if (!bookmark) {
-        setSaved(false);
-        setError("Не удалось сохранить закладку. Попробуйте ещё раз.");
+        if (bookmark) return;
+      } catch {
+        // Network failures are handled by the same rollback below.
       }
-    });
+
+      setSaved(false);
+      setError("Не удалось сохранить закладку. Попробуйте ещё раз.");
+    })();
   };
 
   return (
