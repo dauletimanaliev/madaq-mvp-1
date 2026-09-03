@@ -3,6 +3,8 @@ import { getBookById } from "@/server/books/queries";
 import { getChaptersByBook } from "@/server/chapters/queries";
 import { BookHero } from "@/components/book/BookHero";
 
+export const dynamic = "force-dynamic";
+
 export default async function BookPage({
   params,
 }: {

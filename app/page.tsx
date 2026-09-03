@@ -1,6 +1,8 @@
 import { getBooks } from "@/server/books/queries";
 import { BookCard } from "@/components/library/BookCard";
 
+export const dynamic = "force-dynamic";
+
 export default async function LibraryPage() {
   const books = await getBooks();
 

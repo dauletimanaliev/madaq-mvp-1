@@ -6,6 +6,8 @@ import { listHighlights } from "@/server/highlights/queries";
 import { DEMO_USER_ID } from "@/lib/mock-data";
 import { Reader } from "@/components/reader/Reader";
 
+export const dynamic = "force-dynamic";
+
 export default async function ReadPage({
   params,
   searchParams,

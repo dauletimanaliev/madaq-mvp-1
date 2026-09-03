@@ -2,6 +2,8 @@ import { getBooks } from "@/server/books/queries";
 import { listBookmarks } from "@/server/bookmarks/queries";
 import { DEMO_USER_ID } from "@/lib/mock-data";
 
+export const dynamic = "force-dynamic";
+
 export default async function ProfilePage() {
   const [books, bookmarks] = await Promise.all([
     getBooks(),

@@ -5,6 +5,8 @@ import { highlightTypes, isHighlightType } from "@/lib/highlights/types";
 import { DEMO_USER_ID } from "@/lib/mock-data";
 import { listUserHighlights } from "@/server/highlights/queries";
 
+export const dynamic = "force-dynamic";
+
 export default async function NotesPage({
   searchParams,
 }: {

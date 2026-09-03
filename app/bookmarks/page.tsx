@@ -2,6 +2,8 @@ import { DEMO_USER_ID } from "@/lib/mock-data";
 import { listBookmarks } from "@/server/bookmarks/queries";
 import { BookmarkItem } from "@/components/bookmarks/BookmarkItem";
 
+export const dynamic = "force-dynamic";
+
 export default async function BookmarksPage() {
   const bookmarks = await listBookmarks(DEMO_USER_ID);
 
