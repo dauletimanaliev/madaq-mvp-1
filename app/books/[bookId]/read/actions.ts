@@ -37,8 +37,29 @@ export async function addHighlight(
   input: Omit<Highlight, "id" | "createdAt" | "type" | "legacyColor"> & {
     type: NonNullable<Highlight["type"]>;
   }
-) {
-  return createHighlight(DEMO_USER_ID, input);
+): Promise<
+  | { ok: true; highlight: Highlight }
+  | { ok: false; message: string }
+> {
+  try {
+    return { ok: true, highlight: await createHighlight(DEMO_USER_ID, input) };
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("overlaps an existing highlight")
+    ) {
+      return {
+        ok: false,
+        message: "Этот фрагмент уже сохранён как заметка.",
+      };
+    }
+
+    console.error("Unable to save highlight.", error);
+    return {
+      ok: false,
+      message: "Не удалось сохранить выделение. Попробуйте ещё раз.",
+    };
+  }
 }
 
 export async function removeHighlight(highlightId: string) {

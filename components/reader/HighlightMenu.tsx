@@ -60,13 +60,17 @@ export function HighlightMenu({
 
     void (async () => {
       try {
-        await addHighlight({
+        const result = await addHighlight({
           bookId,
           chapterId,
           startPosition: selectedRange.startPosition,
           endPosition: selectedRange.endPosition,
           type,
         });
+
+        if (!result.ok) {
+          onFailed(tempHighlight.id, result.message);
+        }
       } catch {
         onFailed(tempHighlight.id, "Не удалось сохранить выделение.");
       }
