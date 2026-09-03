@@ -32,7 +32,5 @@ if (globalForPrisma.prisma && !hasCurrentSchema) {
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-  globalForPrisma.prismaSchemaVersion = prismaSchemaVersion;
-}
+globalForPrisma.prisma = prisma;
+globalForPrisma.prismaSchemaVersion = prismaSchemaVersion;
