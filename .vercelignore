@@ -1,0 +1,8 @@
+# Vercel receives runtime configuration only through Project Environment Variables.
+# Never include local secret files in a direct CLI deployment artifact.
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.vercel
