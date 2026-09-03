@@ -18,16 +18,20 @@ export default async function ReadPage({
   const { bookId } = await params;
   const { chapter: chapterParam, at } = await searchParams;
 
-  const book = await getBookById(bookId);
-  if (!book) notFound();
+  const [book, chapters, savedProgress] = await Promise.all([
+    getBookById(bookId),
+    getChaptersByBook(bookId),
+    getProgress(DEMO_USER_ID, bookId),
+  ]);
 
-  const chapters = await getChaptersByBook(bookId);
-  const savedProgress = await getProgress(DEMO_USER_ID, bookId);
+  if (!book || chapters.length === 0) notFound();
+
   const savedChapter = chapters.find(
     (candidate) => candidate.id === savedProgress?.chapterId
   );
-  const chapterNumber = Number(chapterParam ?? savedChapter?.number ?? 1);
-  const chapter = await getChapterByNumber(bookId, chapterNumber);
+  const parsedNumber = Number(chapterParam ?? savedChapter?.number ?? 1);
+  const chapterNumber = Number.isInteger(parsedNumber) && parsedNumber > 0 ? parsedNumber : 1;
+  const chapter = (await getChapterByNumber(bookId, chapterNumber)) ?? chapters[0];
   if (!chapter) notFound();
 
   const highlights = await listHighlights(DEMO_USER_ID, chapter.id);

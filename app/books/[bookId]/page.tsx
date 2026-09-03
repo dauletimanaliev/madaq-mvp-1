@@ -11,10 +11,11 @@ export default async function BookPage({
   params: Promise<{ bookId: string }>;
 }) {
   const { bookId } = await params;
-  const book = await getBookById(bookId);
+  const [book, chapters] = await Promise.all([
+    getBookById(bookId),
+    getChaptersByBook(bookId),
+  ]);
   if (!book) notFound();
-
-  const chapters = await getChaptersByBook(bookId);
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-16">
