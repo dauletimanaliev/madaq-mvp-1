@@ -1,0 +1,174 @@
+// Madaq — MVP1 schema
+// Только то, что реально нужно сейчас: авторы, книги, главы,
+// пользователи, прогресс чтения, закладки и выделения.
+// Никаких reviews/ratings/genres/favorites и т.д. — добавим,
+// когда продукт это реально потребует.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum HighlightType {
+  protein
+  carbohydrate
+  fat
+  vitamin
+  fiber
+}
+
+// ──────────────────────────────
+// Author 1 ─── N Book
+// ──────────────────────────────
+model Author {
+  id        String   @id @default(cuid())
+  name      String
+  bio       String?
+  photoUrl  String?  @map("photo_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  books Book[]
+
+  @@map("authors")
+}
+
+// ──────────────────────────────
+// Book 1 ─── N Chapter
+// ──────────────────────────────
+model Book {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?
+  coverUrl      String?  @map("cover_url")
+  language      String   @default("ru")
+  publishedYear Int?     @map("published_year")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  authorId String @map("author_id")
+  author   Author @relation(fields: [authorId], references: [id])
+
+  chapters        Chapter[]
+  readingProgress ReadingProgress[]
+  bookmarks       Bookmark[]
+  highlights      Highlight[]
+
+  @@index([authorId])
+  @@map("books")
+}
+
+// ──────────────────────────────
+// Chapter (принадлежит одной книге)
+// ──────────────────────────────
+model Chapter {
+  id        String   @id @default(cuid())
+  number    Int
+  title     String?
+  content   String // текст главы, не всей книги целиком
+  createdAt DateTime @default(now()) @map("created_at")
+
+  bookId String @map("book_id")
+  book   Book   @relation(fields: [bookId], references: [id])
+
+  readingProgress ReadingProgress[]
+  bookmarks       Bookmark[]
+  highlights      Highlight[]
+
+  @@unique([bookId, number]) // у книги не может быть двух четвёртых глав
+  @@map("chapters")
+}
+
+// ──────────────────────────────
+// User 1 ─── N ReadingProgress
+// User 1 ─── N Bookmark
+// ──────────────────────────────
+model User {
+  id        String   @id @default(cuid())
+  name      String?
+  email     String   @unique
+  avatarUrl String?  @map("avatar_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  readingProgress ReadingProgress[]
+  bookmarks       Bookmark[]
+  highlights      Highlight[]
+
+  @@map("users")
+}
+
+// ──────────────────────────────
+// ReadingProgress
+// Один пользователь = одна активная позиция на книгу.
+// Поэтому @@unique([userId, bookId]) — при обновлении прогресса
+// делаем upsert, а не плодим новые строки.
+// ──────────────────────────────
+model ReadingProgress {
+  id              String   @id @default(cuid())
+  position        Int      @default(0) // позиция в тексте главы (символы)
+  progressPercent Float    @default(0) @map("progress_percent")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  userId    String  @map("user_id")
+  user      User    @relation(fields: [userId], references: [id])
+  bookId    String  @map("book_id")
+  book      Book    @relation(fields: [bookId], references: [id])
+  chapterId String  @map("chapter_id")
+  chapter   Chapter @relation(fields: [chapterId], references: [id])
+
+  @@unique([userId, bookId])
+  @@index([bookId])
+  @@map("reading_progress")
+}
+
+// ──────────────────────────────
+// Bookmark
+// В отличие от ReadingProgress — пользователь может
+// иметь сколько угодно закладок в одной книге.
+// ──────────────────────────────
+model Bookmark {
+  id        String   @id @default(cuid())
+  position  Int
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  userId    String  @map("user_id")
+  user      User    @relation(fields: [userId], references: [id])
+  bookId    String  @map("book_id")
+  book      Book    @relation(fields: [bookId], references: [id])
+  chapterId String  @map("chapter_id")
+  chapter   Chapter @relation(fields: [chapterId], references: [id])
+
+  @@index([userId, bookId])
+  @@map("bookmarks")
+}
+
+// ──────────────────────────────
+// Highlight
+// Canonical UTF-16 offsets in Chapter.content. Overlapping ranges are
+// rejected in the server layer for the MVP. `legacyColor` is populated only
+// for unclassified highlights imported from the previous color-only system.
+// ──────────────────────────────
+model Highlight {
+  id            String         @id @default(cuid())
+  startPosition Int            @map("start_position")
+  endPosition   Int            @map("end_position")
+  type          HighlightType?
+  legacyColor   String?        @map("legacy_color")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  userId    String  @map("user_id")
+  user      User    @relation(fields: [userId], references: [id])
+  bookId    String  @map("book_id")
+  book      Book    @relation(fields: [bookId], references: [id])
+  chapterId String  @map("chapter_id")
+  chapter   Chapter @relation(fields: [chapterId], references: [id])
+
+  @@unique([userId, chapterId, startPosition, endPosition])
+  @@index([userId, chapterId])
+  @@index([bookId])
+  @@map("highlights")
+}

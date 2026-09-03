@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+:root {
+  /* Библиотека — тёплая бумага, читается днём */
+  --paper: #efe6d3;
+  --paper-soft: #f7f2e6;
+  --ink: #211d16;
+  --ink-muted: #6e6656;
+  --accent: #7a2e3a; /* переплёт книги, а не терракота */
+  --accent-soft: #efd9dc;
+  --border: #ddd0b3;
+
+  /* Reader — тёмная сторона, для сосредоточенного чтения */
+  --reader-bg: #1c2420;
+  --reader-text: #ece4d2;
+  --reader-muted: #8c9a90;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-soft: var(--paper-soft);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-border: var(--border);
+  --color-reader-bg: var(--reader-bg);
+  --color-reader-text: var(--reader-text);
+  --color-reader-muted: var(--reader-muted);
+  --font-serif: var(--font-lora);
+  --font-sans: var(--font-manrope);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+::highlight(madaq-highlight-protein) {
+  background-color: rgb(248 113 113 / 0.75);
+}
+
+::highlight(madaq-highlight-carbohydrate) {
+  background-color: rgb(251 146 60 / 0.75);
+}
+
+::highlight(madaq-highlight-fat) {
+  background-color: rgb(254 240 138 / 0.8);
+}
+
+::highlight(madaq-highlight-vitamin) {
+  background-color: rgb(134 239 172 / 0.75);
+}
+
+::highlight(madaq-highlight-fiber) {
+  background-color: rgb(147 197 253 / 0.75);
+}
+
+::highlight(madaq-highlight-legacy-pink) {
+  background-color: rgb(249 168 212 / 0.75);
+}
