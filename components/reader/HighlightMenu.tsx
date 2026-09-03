@@ -25,7 +25,7 @@ export function HighlightMenu({
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -42,24 +42,37 @@ export function HighlightMenu({
   const selectedRange = selection;
 
   function create(type: HighlightType) {
+    // 1. Оптимистичное обновление: сразу передаём выделение и закрываем меню (0 мс задержки)
+    const tempHighlight: Highlight = {
+      id: `temp-${Date.now()}`,
+      bookId,
+      chapterId,
+      startPosition: selectedRange.startPosition,
+      endPosition: selectedRange.endPosition,
+      type,
+      legacyColor: null,
+      createdAt: new Date().toISOString(),
+    };
+
+    onCreated(tempHighlight);
+
+    // 2. Фоновое сохранение в базу данных
     startTransition(async () => {
       try {
         setError(null);
-        const highlight = await addHighlight({
+        await addHighlight({
           bookId,
           chapterId,
           startPosition: selectedRange.startPosition,
           endPosition: selectedRange.endPosition,
           type,
         });
-        onCreated(highlight);
       } catch {
         setError("Не удалось сохранить выделение.");
       }
     });
   }
 
-  // Desktop positioning: float directly near selection rect
   const menuWidth = 320;
   const rawTop = selectedRange.rect.top - 48;
   const top = rawTop < 10 ? selectedRange.rect.bottom + 8 : rawTop;
@@ -91,9 +104,8 @@ export function HighlightMenu({
             type="button"
             aria-label={`${colorName}: ${name}`}
             title={`${colorName}: ${name}`}
-            disabled={isPending}
             onClick={() => create(type)}
-            className={`whitespace-nowrap rounded-lg border border-reader-text/20 px-2 py-1.5 text-xs font-medium text-reader-text transition-transform active:scale-95 ${menuClassName} disabled:opacity-60`}
+            className={`whitespace-nowrap rounded-lg border border-reader-text/20 px-2 py-1.5 text-xs font-medium text-reader-text transition-transform active:scale-95 hover:opacity-90 ${menuClassName}`}
           >
             {name}
           </button>
