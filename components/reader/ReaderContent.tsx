@@ -264,6 +264,69 @@ export function ReaderContent({
   }, [onSelectionChange]);
 
   useEffect(() => {
+    const handleSelection = () => {
+      requestAnimationFrame(captureSelection);
+    };
+
+    document.addEventListener("selectionchange", handleSelection);
+    return () => {
+      document.removeEventListener("selectionchange", handleSelection);
+    };
+  }, [captureSelection]);
+
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      touchStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        time: Date.now(),
+      };
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    captureSelection();
+
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start || e.changedTouches.length === 0) return;
+
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return;
+
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    const duration = Date.now() - start.time;
+
+    if (Math.abs(dx) > 40 && Math.abs(dy) < 60 && duration < 500) {
+      if (dx < 0) {
+        goToPage(pageIndex + 1);
+      } else {
+        goToPage(pageIndex - 1);
+      }
+      return;
+    }
+
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && duration < 300) {
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+      const rect = viewport.getBoundingClientRect();
+      const clickX = touch.clientX - rect.left;
+      const widthRatio = clickX / rect.width;
+
+      if (widthRatio > 0.8) {
+        goToPage(pageIndex + 1);
+      } else if (widthRatio < 0.2) {
+        goToPage(pageIndex - 1);
+      }
+    }
+  };
+
+  useEffect(() => {
     const previous = () => goToPage(pageIndex - 1);
     const next = () => goToPage(pageIndex + 1);
     window.addEventListener("reader:previous-page", previous);
@@ -287,7 +350,7 @@ export function ReaderContent({
     : 0;
 
   return (
-    <section className="py-6">
+    <section className="py-4 md:py-6 select-text">
       <div className="mb-3 flex items-center justify-between text-sm text-reader-muted">
         <span>
           Страница {pageIndex + 1} из {pageCount}
@@ -295,15 +358,15 @@ export function ReaderContent({
         <div className="flex items-center gap-2" aria-label="Размер текста">
           <button
             type="button"
-            onClick={() => setFontSize((size) => Math.max(16, size - 1))}
-            className="rounded border border-reader-text/20 px-2 py-1 hover:border-reader-text/40"
+            onClick={() => setFontSize((size) => Math.max(14, size - 1))}
+            className="rounded border border-reader-text/20 px-2 py-1 hover:border-reader-text/40 active:scale-95"
           >
             A−
           </button>
           <button
             type="button"
             onClick={() => setFontSize((size) => Math.min(24, size + 1))}
-            className="rounded border border-reader-text/20 px-2 py-1 hover:border-reader-text/40"
+            className="rounded border border-reader-text/20 px-2 py-1 hover:border-reader-text/40 active:scale-95"
           >
             A+
           </button>
@@ -311,13 +374,16 @@ export function ReaderContent({
       </div>
       <div
         ref={viewportRef}
-        className="h-[calc(100vh-22rem)] min-h-80 overflow-x-auto overflow-y-hidden"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onMouseUp={captureSelection}
+        onPointerUp={captureSelection}
+        className="h-[calc(100dvh-15rem)] md:h-[calc(100vh-22rem)] min-h-[300px] overflow-x-auto overflow-y-hidden select-text touch-pan-y"
         style={{ scrollbarWidth: "none" }}
       >
         <div
           ref={flowRef}
-          onMouseUp={captureSelection}
-          className="font-serif text-reader-text"
+          className="font-serif text-reader-text select-text"
           style={{
             columnWidth: `${pageWidth}px`,
             columnGap: `${COLUMN_GAP}px`,
@@ -328,7 +394,7 @@ export function ReaderContent({
           }}
         >
           {paragraphs.map((paragraph) => (
-            <p key={paragraph.start} data-start={paragraph.start} className="mb-5">
+            <p key={paragraph.start} data-start={paragraph.start} className="mb-5 select-text">
               {paragraph === markerParagraph
                 ? paragraph.text.slice(0, markerOffset)
                 : paragraph.text}

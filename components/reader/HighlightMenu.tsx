@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { addHighlight } from "@/app/books/[bookId]/read/actions";
 import { highlightTypes } from "@/lib/highlights/types";
 import type { Highlight, HighlightType } from "@/lib/types";
@@ -26,17 +26,20 @@ export function HighlightMenu({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 640);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   if (!selection || selection.startPosition === selection.endPosition) {
     return null;
   }
 
   const selectedRange = selection;
-  const top = Math.max(8, selectedRange.rect.top - 44);
-  const left = Math.max(
-    8,
-    selectedRange.rect.left + selectedRange.rect.width / 2 - 72
-  );
 
   function create(type: HighlightType) {
     startTransition(async () => {
@@ -56,32 +59,51 @@ export function HighlightMenu({
     });
   }
 
+  // Desktop positioning: float directly near selection rect
+  const menuWidth = 320;
+  const rawTop = selectedRange.rect.top - 48;
+  const top = rawTop < 10 ? selectedRange.rect.bottom + 8 : rawTop;
+  const left = Math.max(
+    12,
+    Math.min(
+      selectedRange.rect.left + selectedRange.rect.width / 2 - menuWidth / 2,
+      (typeof window !== "undefined" ? window.innerWidth : 600) - menuWidth - 12
+    )
+  );
+
   return (
     <div
       role="dialog"
-      aria-label="Цвет выделения"
-      className="fixed z-20 flex items-center gap-1 rounded-md border border-reader-text/15 bg-reader-bg px-2 py-1 shadow-lg"
-      style={{ top, left }}
+      aria-label="Цвет заметки"
+      className={`fixed z-50 flex items-center justify-between gap-1.5 rounded-xl border border-reader-text/20 bg-paper/95 p-2 shadow-2xl backdrop-blur-md transition-all ${
+        isMobile
+          ? "bottom-4 left-4 right-4 max-w-md mx-auto"
+          : "max-w-xs"
+      }`}
+      style={isMobile ? undefined : { top: `${top}px`, left: `${left}px` }}
       onMouseDown={(event) => event.preventDefault()}
+      onTouchStart={(event) => event.stopPropagation()}
     >
-      {highlightTypes.map(({ type, name, colorName, menuClassName }) => (
-        <button
-          key={type}
-          type="button"
-          aria-label={`${colorName}: ${name}`}
-          title={`${colorName}: ${name}`}
-          disabled={isPending}
-          onClick={() => create(type)}
-          className={`rounded border border-reader-text/20 px-1.5 py-1 text-xs text-reader-text ${menuClassName} disabled:opacity-60`}
-        >
-          {name}
-        </button>
-      ))}
+      <div className="flex flex-1 items-center justify-around gap-1 overflow-x-auto">
+        {highlightTypes.map(({ type, name, colorName, menuClassName }) => (
+          <button
+            key={type}
+            type="button"
+            aria-label={`${colorName}: ${name}`}
+            title={`${colorName}: ${name}`}
+            disabled={isPending}
+            onClick={() => create(type)}
+            className={`whitespace-nowrap rounded-lg border border-reader-text/20 px-2 py-1.5 text-xs font-medium text-reader-text transition-transform active:scale-95 ${menuClassName} disabled:opacity-60`}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
       <button
         type="button"
         aria-label="Закрыть меню выделения"
         onClick={onClose}
-        className="ml-1 text-sm text-reader-muted"
+        className="flex h-7 w-7 items-center justify-center rounded-full text-base font-bold text-ink-muted hover:bg-paper-soft hover:text-ink"
       >
         ×
       </button>

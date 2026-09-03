@@ -92,8 +92,8 @@ export function Reader({
   }
 
   return (
-    <div className="min-h-[calc(100vh-73px)] bg-reader-bg">
-      <div className="mx-auto flex max-w-2xl flex-col px-6 py-10">
+    <div className="min-h-[100dvh] md:min-h-[calc(100vh-73px)] bg-reader-bg">
+      <div className="mx-auto flex max-w-2xl flex-col px-4 py-4 md:px-6 md:py-10">
         <ReaderHeader
           bookId={book.id}
           bookTitle={book.title}
