@@ -17,7 +17,7 @@ export function ReaderControls({
         type="button"
         onClick={onPrevious}
         disabled={!canGoPrevious}
-        className="hover:text-reader-text disabled:cursor-not-allowed disabled:opacity-0"
+        className="min-h-11 min-w-11 px-3 hover:text-reader-text disabled:cursor-not-allowed disabled:opacity-0"
       >
         Назад
       </button>
@@ -28,7 +28,7 @@ export function ReaderControls({
         type="button"
         onClick={onNext}
         disabled={!canGoNext}
-        className="hover:text-reader-text disabled:cursor-not-allowed disabled:opacity-0"
+        className="min-h-11 min-w-11 px-3 hover:text-reader-text disabled:cursor-not-allowed disabled:opacity-0"
       >
         Дальше
       </button>

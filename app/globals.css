@@ -36,26 +36,3 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
 }
-::highlight(madaq-highlight-protein) {
-  background-color: rgb(248 113 113 / 0.75);
-}
-
-::highlight(madaq-highlight-carbohydrate) {
-  background-color: rgb(251 146 60 / 0.75);
-}
-
-::highlight(madaq-highlight-fat) {
-  background-color: rgb(254 240 138 / 0.8);
-}
-
-::highlight(madaq-highlight-vitamin) {
-  background-color: rgb(134 239 172 / 0.75);
-}
-
-::highlight(madaq-highlight-fiber) {
-  background-color: rgb(147 197 253 / 0.75);
-}
-
-::highlight(madaq-highlight-legacy-pink) {
-  background-color: rgb(249 168 212 / 0.75);
-}

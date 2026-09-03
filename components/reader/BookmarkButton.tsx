@@ -48,7 +48,7 @@ export function BookmarkButton({
       <button
         onClick={handleAddBookmark}
         disabled={saved}
-        className="rounded-lg border border-reader-text/20 px-4 py-2 text-sm text-reader-text transition-all active:scale-95 hover:border-reader-text/40 disabled:opacity-60"
+        className="min-h-11 rounded-lg border border-reader-text/20 px-4 py-2 text-sm text-reader-text transition-all active:scale-95 hover:border-reader-text/40 disabled:opacity-60"
       >
         {saved ? "✓ Заложено" : "Добавить закладку"}
       </button>

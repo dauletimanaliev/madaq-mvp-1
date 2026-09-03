@@ -35,6 +35,7 @@ export function Reader({
     endPosition: number;
     rect: DOMRect;
   } | null>(null);
+  const [highlightError, setHighlightError] = useState<string | null>(null);
 
   const chapterIndex = chapterMetrics.findIndex((item) => item.id === chapter.id);
   const progressPercent = useMemo(() => {
@@ -113,11 +114,21 @@ export function Reader({
           selection={selectedRange}
           onCreated={(highlight) => {
             setHighlights((current) => [...current, highlight]);
+            setHighlightError(null);
             setSelectedRange(null);
             window.getSelection()?.removeAllRanges();
           }}
+          onFailed={(highlightId, message) => {
+            setHighlights((current) => current.filter((item) => item.id !== highlightId));
+            setHighlightError(message);
+          }}
           onClose={() => setSelectedRange(null)}
         />
+        {highlightError && (
+          <p role="status" className="mt-2 text-sm text-red-300">
+            {highlightError}
+          </p>
+        )}
         <div className="flex items-center justify-between pb-6">
           <BookmarkButton
             bookId={book.id}

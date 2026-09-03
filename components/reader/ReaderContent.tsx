@@ -57,6 +57,26 @@ const highlightNames = {
   fiber: "madaq-highlight-fiber",
 };
 const legacyPinkHighlightName = "madaq-highlight-legacy-pink";
+const highlightStyleId = "madaq-highlight-styles";
+
+// Turbopack/PostCSS does not currently parse CSS Custom Highlight selectors.
+// Install these browser-only rules after feature detection so unsupported
+// browsers simply render the reader without highlights instead of failing a build.
+function ensureHighlightStyles() {
+  if (document.getElementById(highlightStyleId)) return;
+
+  const styles = document.createElement("style");
+  styles.id = highlightStyleId;
+  styles.textContent = `
+    ::highlight(madaq-highlight-protein) { background-color: rgb(252 165 165 / 0.48); }
+    ::highlight(madaq-highlight-carbohydrate) { background-color: rgb(253 186 116 / 0.48); }
+    ::highlight(madaq-highlight-fat) { background-color: rgb(253 230 138 / 0.52); }
+    ::highlight(madaq-highlight-vitamin) { background-color: rgb(167 243 208 / 0.46); }
+    ::highlight(madaq-highlight-fiber) { background-color: rgb(186 230 253 / 0.48); }
+    ::highlight(madaq-highlight-legacy-pink) { background-color: rgb(251 207 232 / 0.5); }
+  `;
+  document.head.append(styles);
+}
 
 type HighlightRegistry = {
   set(name: string, highlight: unknown): void;
@@ -148,6 +168,8 @@ export function ReaderContent({
     ).Highlight;
 
     if (!flow || !registry || !HighlightConstructor) return;
+
+    ensureHighlightStyles();
 
     for (const name of Object.values(highlightNames)) {
       registry.delete(name);
