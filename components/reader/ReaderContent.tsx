@@ -104,6 +104,7 @@ export function ReaderContent({
     startPosition: number;
     endPosition: number;
     rect: DOMRect;
+    bottomRect?: DOMRect;
     existingHighlight?: Highlight | null;
   } | null) => void;
 }) {
