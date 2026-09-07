@@ -290,7 +290,11 @@ export function ReaderContent({
       const positions = domRangeToCanonicalOffsets(range, flow);
 
       if (positions.startPosition !== positions.endPosition) {
-        const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
+        const rects = Array.from(range.getClientRects());
+        // topRect = topmost rect (for positioning above on desktop)
+        // bottomRect = bottommost rect (for positioning below on mobile so native menu stays free)
+        const topRect = rects[0] ?? range.getBoundingClientRect();
+        const bottomRect = rects[rects.length - 1] ?? range.getBoundingClientRect();
         const existingHighlight =
           highlights.find(
             (h) =>
@@ -300,7 +304,8 @@ export function ReaderContent({
 
         onSelectionChange({
           ...positions,
-          rect,
+          rect: topRect,
+          bottomRect,
           existingHighlight,
         });
         return;
@@ -316,14 +321,15 @@ export function ReaderContent({
           startPosition: matchingHighlight.startPosition,
           endPosition: matchingHighlight.endPosition,
         });
-        const rect =
-          highlightDomRange.getClientRects()[0] ??
-          highlightDomRange.getBoundingClientRect();
+        const allRects = Array.from(highlightDomRange.getClientRects());
+        const topRect = allRects[0] ?? highlightDomRange.getBoundingClientRect();
+        const bottomRect = allRects[allRects.length - 1] ?? highlightDomRange.getBoundingClientRect();
 
         onSelectionChange({
           startPosition: matchingHighlight.startPosition,
           endPosition: matchingHighlight.endPosition,
-          rect,
+          rect: topRect,
+          bottomRect,
           existingHighlight: matchingHighlight,
         });
         return;

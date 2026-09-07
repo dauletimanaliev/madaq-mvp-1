@@ -13,6 +13,7 @@ export type SelectionRange = {
   startPosition: number;
   endPosition: number;
   rect: DOMRect;
+  bottomRect?: DOMRect;
   existingHighlight?: Highlight | null;
 };
 
@@ -151,19 +152,38 @@ export function HighlightMenu({
   const numButtons = 5 + (existing ? 1 : 0) + 1;
   const menuWidth = numButtons * 40 + 16;
   const menuHeight = 52;
-  const rawTop = selectedRange.rect.top - menuHeight - 12;
-  const preferredTop = rawTop < 12 ? selectedRange.rect.bottom + 12 : rawTop;
-  const top = Math.max(
-    12,
-    Math.min(
-      preferredTop,
-      (typeof window !== "undefined" ? window.innerHeight : 600) - menuHeight - 12
-    )
-  );
+
+  // On mobile (touch), always show BELOW the selection so the native
+  // Copy / Share menu above the text stays completely clear.
+  const isTouchDevice =
+    typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+  const anchorRect = isTouchDevice
+    ? (selectedRange.bottomRect ?? selectedRange.rect)
+    : selectedRange.rect;
+
+  let top: number;
+  if (isTouchDevice) {
+    // Always below on mobile — give 10px gap under the selection
+    top = Math.min(
+      anchorRect.bottom + 10,
+      (typeof window !== "undefined" ? window.innerHeight : 600) - menuHeight - 8
+    );
+  } else {
+    const rawTop = anchorRect.top - menuHeight - 12;
+    const preferredTop = rawTop < 12 ? anchorRect.bottom + 12 : rawTop;
+    top = Math.max(
+      12,
+      Math.min(
+        preferredTop,
+        (typeof window !== "undefined" ? window.innerHeight : 600) - menuHeight - 12
+      )
+    );
+  }
+
   const left = Math.max(
     12,
     Math.min(
-      selectedRange.rect.left + selectedRange.rect.width / 2 - menuWidth / 2,
+      anchorRect.left + anchorRect.width / 2 - menuWidth / 2,
       (typeof window !== "undefined" ? window.innerWidth : 600) - menuWidth - 12
     )
   );
