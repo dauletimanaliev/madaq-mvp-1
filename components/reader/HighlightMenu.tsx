@@ -177,7 +177,7 @@ export function HighlightMenu({
       onMouseDown={(event) => event.preventDefault()}
       onTouchStart={(event) => event.stopPropagation()}
     >
-      {highlightTypes.map(({ type, name, colorName }) => {
+      {highlightTypes.map(({ type, name, shortLabel, colorName }) => {
         const isActive = existing?.type === type;
         const style = colorStyles[type];
         return (
@@ -187,17 +187,13 @@ export function HighlightMenu({
             aria-label={`${colorName}: ${name}`}
             title={`${colorName}: ${name}`}
             onClick={() => selectColor(type)}
-            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-ink font-bold transition-all active:scale-90 ${style.bg} ${style.border} ${
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-xs font-serif font-bold text-ink transition-all active:scale-90 select-none ${style.bg} ${style.border} ${
               isActive
-                ? `ring-2 ${style.ring} ring-offset-2 ring-offset-paper scale-110 shadow-md`
+                ? `ring-2 ${style.ring} ring-offset-2 ring-offset-paper scale-110 shadow-md font-extrabold`
                 : "opacity-90 hover:opacity-100"
             }`}
           >
-            {isActive && (
-              <svg className="w-4 h-4 text-ink drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            )}
+            {shortLabel}
           </button>
         );
       })}
