@@ -202,13 +202,14 @@ export function domRangeToCanonicalOffsets(
  */
 export function canonicalOffsetsToDomRange(
   root: HTMLElement,
-  { startPosition, endPosition }: CanonicalRange
+  { startPosition, endPosition }: CanonicalRange,
+  cachedNodes?: CanonicalTextNodePosition[]
 ) {
   if (startPosition < 0 || endPosition < startPosition) {
     throw new Error("Canonical range is invalid.");
   }
 
-  const nodes = getCanonicalTextNodePositions(root);
+  const nodes = cachedNodes ?? getCanonicalTextNodePositions(root);
   const start = getRangeBoundary(nodes, startPosition, false);
   const end = getRangeBoundary(nodes, endPosition, true);
   const range = document.createRange();

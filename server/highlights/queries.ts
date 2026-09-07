@@ -75,35 +75,32 @@ export async function createHighlight(
   input: CreateHighlightInput
 ): Promise<Highlight> {
   const chapter = await prisma.chapter.findFirst({
-      where: { id: input.chapterId, bookId: input.bookId },
-      select: { content: true },
-    });
+    where: { id: input.chapterId, bookId: input.bookId },
+    select: { content: true },
+  });
 
-    if (!chapter) {
-      throw new Error("Chapter does not belong to the specified book.");
-    }
+  if (!chapter) {
+    throw new Error("Chapter does not belong to the specified book.");
+  }
 
-    if (
-      input.startPosition < 0 ||
-      input.endPosition <= input.startPosition ||
-      input.endPosition > chapter.content.length
-    ) {
-      throw new Error("Highlight range is outside the chapter content.");
-    }
+  if (
+    input.startPosition < 0 ||
+    input.endPosition <= input.startPosition ||
+    input.endPosition > chapter.content.length
+  ) {
+    throw new Error("Highlight range is outside the chapter content.");
+  }
 
-  const overlappingHighlight = await prisma.highlight.findFirst({
-      where: {
-        userId,
-        chapterId: input.chapterId,
-        startPosition: { lt: input.endPosition },
-        endPosition: { gt: input.startPosition },
-      },
-      select: { id: true },
-    });
-
-    if (overlappingHighlight) {
-      throw new Error("Highlight range overlaps an existing highlight.");
-    }
+  // Delete any overlapping highlights for this user and chapter so that
+  // creating a new selection replaces existing highlights in that range.
+  await prisma.highlight.deleteMany({
+    where: {
+      userId,
+      chapterId: input.chapterId,
+      startPosition: { lt: input.endPosition },
+      endPosition: { gt: input.startPosition },
+    },
+  });
 
   const highlight = await prisma.highlight.create({
     data: {
@@ -117,6 +114,25 @@ export async function createHighlight(
   });
 
   return toHighlight(highlight);
+}
+
+export async function updateHighlightType(
+  userId: string,
+  highlightId: string,
+  type: HighlightType
+): Promise<Highlight | null> {
+  const existing = await prisma.highlight.findFirst({
+    where: { id: highlightId, userId },
+  });
+
+  if (!existing) return null;
+
+  const updated = await prisma.highlight.update({
+    where: { id: highlightId },
+    data: { type, legacyColor: null },
+  });
+
+  return toHighlight(updated);
 }
 
 export async function deleteHighlight(

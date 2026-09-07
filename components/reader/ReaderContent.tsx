@@ -11,6 +11,7 @@ import {
 import {
   canonicalOffsetsToDomRange,
   domRangeToCanonicalOffsets,
+  getCanonicalTextNodePositions,
 } from "@/lib/highlights/positions";
 import type { Highlight } from "@/lib/types";
 
@@ -103,6 +104,7 @@ export function ReaderContent({
     startPosition: number;
     endPosition: number;
     rect: DOMRect;
+    existingHighlight?: Highlight | null;
   } | null) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -176,14 +178,20 @@ export function ReaderContent({
     }
     registry.delete(legacyPinkHighlightName);
 
+    const cachedNodes = getCanonicalTextNodePositions(flow);
+
     for (const color of Object.keys(highlightNames) as (keyof typeof highlightNames)[]) {
       const ranges = highlights
         .filter((highlight) => highlight.type === color)
         .map((highlight) =>
-          canonicalOffsetsToDomRange(flow, {
-            startPosition: highlight.startPosition,
-            endPosition: highlight.endPosition,
-          })
+          canonicalOffsetsToDomRange(
+            flow,
+            {
+              startPosition: highlight.startPosition,
+              endPosition: highlight.endPosition,
+            },
+            cachedNodes
+          )
         );
 
       if (ranges.length > 0) {
@@ -194,10 +202,14 @@ export function ReaderContent({
     const legacyPinkRanges = highlights
       .filter((highlight) => highlight.type === null && highlight.legacyColor === "pink")
       .map((highlight) =>
-        canonicalOffsetsToDomRange(flow, {
-          startPosition: highlight.startPosition,
-          endPosition: highlight.endPosition,
-        })
+        canonicalOffsetsToDomRange(
+          flow,
+          {
+            startPosition: highlight.startPosition,
+            endPosition: highlight.endPosition,
+          },
+          cachedNodes
+        )
       );
 
     if (legacyPinkRanges.length > 0) {
@@ -260,7 +272,7 @@ export function ReaderContent({
   const captureSelection = useCallback(() => {
     const selection = window.getSelection();
     const flow = flowRef.current;
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !flow) {
+    if (!selection || selection.rangeCount === 0 || !flow) {
       onSelectionChange(null);
       return;
     }
@@ -273,17 +285,52 @@ export function ReaderContent({
 
     try {
       const positions = domRangeToCanonicalOffsets(range, flow);
-      if (positions.startPosition === positions.endPosition) {
-        onSelectionChange(null);
+
+      if (positions.startPosition !== positions.endPosition) {
+        const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
+        const existingHighlight =
+          highlights.find(
+            (h) =>
+              h.startPosition < positions.endPosition &&
+              h.endPosition > positions.startPosition
+          ) ?? null;
+
+        onSelectionChange({
+          ...positions,
+          rect,
+          existingHighlight,
+        });
         return;
       }
 
-      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
-      onSelectionChange({ ...positions, rect });
+      const caretPosition = positions.startPosition;
+      const matchingHighlight = highlights.find(
+        (h) => caretPosition >= h.startPosition && caretPosition < h.endPosition
+      );
+
+      if (matchingHighlight) {
+        const highlightDomRange = canonicalOffsetsToDomRange(flow, {
+          startPosition: matchingHighlight.startPosition,
+          endPosition: matchingHighlight.endPosition,
+        });
+        const rect =
+          highlightDomRange.getClientRects()[0] ??
+          highlightDomRange.getBoundingClientRect();
+
+        onSelectionChange({
+          startPosition: matchingHighlight.startPosition,
+          endPosition: matchingHighlight.endPosition,
+          rect,
+          existingHighlight: matchingHighlight,
+        });
+        return;
+      }
+
+      onSelectionChange(null);
     } catch {
       onSelectionChange(null);
     }
-  }, [onSelectionChange]);
+  }, [highlights, onSelectionChange]);
 
   useEffect(() => {
     const handleSelection = () => {

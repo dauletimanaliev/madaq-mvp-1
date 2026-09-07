@@ -8,7 +8,7 @@ import { ReaderContent } from "./ReaderContent";
 import { ReaderControls } from "./ReaderControls";
 import { BookmarkButton } from "./BookmarkButton";
 import { saveProgress } from "@/app/books/[bookId]/read/actions";
-import { HighlightMenu } from "./HighlightMenu";
+import { HighlightMenu, type SelectionRange } from "./HighlightMenu";
 
 export function Reader({
   book,
@@ -30,11 +30,7 @@ export function Reader({
     hasNextPage: false,
   });
   const [highlights, setHighlights] = useState(initialHighlights);
-  const [selectedRange, setSelectedRange] = useState<{
-    startPosition: number;
-    endPosition: number;
-    rect: DOMRect;
-  } | null>(null);
+  const [selectedRange, setSelectedRange] = useState<SelectionRange | null>(null);
   const [highlightError, setHighlightError] = useState<string | null>(null);
 
   const chapterIndex = chapterMetrics.findIndex((item) => item.id === chapter.id);
@@ -67,6 +63,15 @@ export function Reader({
 
   const previousChapter = chapterMetrics[chapterIndex - 1];
   const nextChapter = chapterMetrics[chapterIndex + 1];
+
+  useEffect(() => {
+    if (previousChapter) {
+      router.prefetch(`/books/${book.id}/read?chapter=${previousChapter.number}&at=end`);
+    }
+    if (nextChapter) {
+      router.prefetch(`/books/${book.id}/read?chapter=${nextChapter.number}`);
+    }
+  }, [book.id, nextChapter, previousChapter, router]);
   const canGoPrevious = pageState.hasPreviousPage || Boolean(previousChapter);
   const canGoNext = pageState.hasNextPage || Boolean(nextChapter);
 
@@ -112,14 +117,41 @@ export function Reader({
           bookId={book.id}
           chapterId={chapter.id}
           selection={selectedRange}
-          onCreated={(highlight) => {
-            setHighlights((current) => [...current, highlight]);
+          onCreated={(newHighlight) => {
+            setHighlights((current) => [
+              ...current.filter(
+                (item) =>
+                  item.endPosition <= newHighlight.startPosition ||
+                  item.startPosition >= newHighlight.endPosition
+              ),
+              newHighlight,
+            ]);
+            setHighlightError(null);
+            setSelectedRange(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+          onUpdated={(updatedHighlight) => {
+            setHighlights((current) =>
+              current.map((item) =>
+                item.id === updatedHighlight.id ? updatedHighlight : item
+              )
+            );
+            setHighlightError(null);
+            setSelectedRange(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+          onDeleted={(highlightId) => {
+            setHighlights((current) =>
+              current.filter((item) => item.id !== highlightId)
+            );
             setHighlightError(null);
             setSelectedRange(null);
             window.getSelection()?.removeAllRanges();
           }}
           onFailed={(highlightId, message) => {
-            setHighlights((current) => current.filter((item) => item.id !== highlightId));
+            setHighlights((current) =>
+              current.filter((item) => item.id !== highlightId)
+            );
             setHighlightError(message);
           }}
           onClose={() => setSelectedRange(null)}
