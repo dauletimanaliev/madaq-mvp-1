@@ -125,12 +125,83 @@ export function HighlightMenu({
     })();
   }
 
-  const menuWidth = isMobile
-    ? Math.min(window.innerWidth - 24, 420)
-    : existing
-    ? 710
-    : 660;
-  const estimatedHeight = isMobile ? 188 : 62;
+  // Mobile Bottom Sheet layout
+  if (isMobile) {
+    return (
+      <div
+        role="dialog"
+        aria-label="Тип заметки"
+        className="fixed inset-x-0 bottom-0 z-50 animate-in slide-in-from-bottom duration-200"
+        onMouseDown={(event) => event.preventDefault()}
+        onTouchStart={(event) => event.stopPropagation()}
+      >
+        <div
+          className="fixed inset-0 -z-10 bg-black/20 backdrop-blur-[2px]"
+          onClick={onClose}
+        />
+        <div className="mx-auto max-w-lg rounded-t-2xl border-t border-reader-text/15 bg-paper/98 p-4 shadow-2xl backdrop-blur-xl pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="h-1.5 w-8 rounded-full bg-ink/20" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                {existing ? "Изменить цвет заметки" : "Выберите цвет заметки"}
+              </span>
+            </div>
+            <button
+              type="button"
+              aria-label="Закрыть"
+              onClick={onClose}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-base font-bold text-ink-muted hover:bg-paper-soft hover:text-ink active:scale-95 transition-colors"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="grid grid-cols-5 gap-2">
+            {highlightTypes.map(({ type, name, colorName, menuClassName }) => {
+              const isActive = existing?.type === type;
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  aria-label={`${colorName}: ${name}`}
+                  title={`${colorName}: ${name}`}
+                  onClick={() => selectColor(type)}
+                  className={`flex flex-col items-center justify-center gap-1 min-h-[52px] rounded-xl border border-ink/10 p-2 text-center text-[11px] font-medium transition-all active:scale-95 ${menuClassName} ${
+                    isActive
+                      ? "ring-2 ring-ink ring-offset-1 font-bold shadow-md scale-[1.04]"
+                      : ""
+                  }`}
+                >
+                  <span className="line-clamp-1 leading-tight">{name}</span>
+                  {isActive && (
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-ink" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {existing && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="mt-3 flex w-full items-center justify-center gap-2 min-h-[44px] rounded-xl border border-red-500/20 bg-red-500/10 text-xs font-semibold text-red-500 hover:bg-red-500/20 active:scale-[0.98] transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Удалить выделение
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Desktop Floating Popover layout
+  const menuWidth = existing ? 710 : 660;
+  const estimatedHeight = 62;
   const rawTop = selectedRange.rect.top - 54;
   const preferredTop = rawTop < 12 ? selectedRange.rect.bottom + 8 : rawTop;
   const top = Math.max(
@@ -154,7 +225,7 @@ export function HighlightMenu({
       onMouseDown={(event) => event.preventDefault()}
       onTouchStart={(event) => event.stopPropagation()}
     >
-      <div className={`grid flex-1 gap-1.5 ${isMobile ? "grid-cols-2" : "grid-cols-5"}`}>
+      <div className="grid flex-1 grid-cols-5 gap-1.5">
         {highlightTypes.map(({ type, name, colorName, menuClassName }) => {
           const isActive = existing?.type === type;
           return (

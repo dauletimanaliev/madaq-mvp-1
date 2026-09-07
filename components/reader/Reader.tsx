@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Book, Chapter, Highlight } from "@/lib/types";
 import { ReaderHeader } from "./ReaderHeader";
 import { ReaderContent } from "./ReaderContent";
 import { ReaderControls } from "./ReaderControls";
-import { BookmarkButton } from "./BookmarkButton";
 import { saveProgress } from "@/app/books/[bookId]/read/actions";
 import { HighlightMenu, type SelectionRange } from "./HighlightMenu";
 
@@ -24,6 +23,7 @@ export function Reader({
   initialHighlights: Highlight[];
 }) {
   const router = useRouter();
+  const [isNavigating, startTransition] = useTransition();
   const [position, setPosition] = useState(initialPosition);
   const [pageState, setPageState] = useState({
     hasPreviousPage: false,
@@ -72,8 +72,10 @@ export function Reader({
       router.prefetch(`/books/${book.id}/read?chapter=${nextChapter.number}`);
     }
   }, [book.id, nextChapter, previousChapter, router]);
+
   const canGoPrevious = pageState.hasPreviousPage || Boolean(previousChapter);
   const canGoNext = pageState.hasNextPage || Boolean(nextChapter);
+  const isLastPageOfChapter = !pageState.hasNextPage && Boolean(nextChapter);
 
   function goToPrevious() {
     if (pageState.hasPreviousPage) {
@@ -82,7 +84,9 @@ export function Reader({
     }
 
     if (previousChapter) {
-      router.push(`/books/${book.id}/read?chapter=${previousChapter.number}&at=end`);
+      startTransition(() => {
+        router.push(`/books/${book.id}/read?chapter=${previousChapter.number}&at=end`);
+      });
     }
   }
 
@@ -93,18 +97,26 @@ export function Reader({
     }
 
     if (nextChapter) {
-      router.push(`/books/${book.id}/read?chapter=${nextChapter.number}`);
+      startTransition(() => {
+        router.push(`/books/${book.id}/read?chapter=${nextChapter.number}`);
+      });
     }
   }
 
   return (
-    <div className="min-h-[100dvh] md:min-h-[calc(100vh-73px)] bg-reader-bg">
-      <div className="mx-auto flex max-w-2xl flex-col px-4 py-4 md:px-6 md:py-10">
+    <div className="fixed inset-0 z-50 flex flex-col bg-reader-bg text-reader-text overflow-hidden">
+      {/* Top Loading Progress Line when changing chapters */}
+      {isNavigating && (
+        <div className="fixed top-0 inset-x-0 h-1 bg-amber-400 z-50 animate-pulse shadow-md" />
+      )}
+
+      <div className="mx-auto flex h-full max-w-2xl w-full flex-col px-3 md:px-6 pt-3 md:pt-6 pb-2 overflow-hidden">
         <ReaderHeader
           bookId={book.id}
           bookTitle={book.title}
           chapterTitle={chapter.title ?? `Глава ${chapter.number}`}
         />
+
         <ReaderContent
           content={chapter.content}
           initialPosition={initialPosition}
@@ -113,6 +125,7 @@ export function Reader({
           onPaginationChange={setPageState}
           onSelectionChange={setSelectedRange}
         />
+
         <HighlightMenu
           bookId={book.id}
           chapterId={chapter.id}
@@ -156,26 +169,25 @@ export function Reader({
           }}
           onClose={() => setSelectedRange(null)}
         />
+
         {highlightError && (
-          <p role="status" className="mt-2 text-sm text-red-300">
+          <p role="status" className="mt-1 text-xs text-red-300">
             {highlightError}
           </p>
         )}
-        <div className="flex items-center justify-between pb-6">
-          <BookmarkButton
-            bookId={book.id}
-            bookTitle={book.title}
-            chapterId={chapter.id}
-            chapterNumber={chapter.number}
-            position={position}
-          />
-        </div>
+
         <ReaderControls
           canGoPrevious={canGoPrevious}
           canGoNext={canGoNext}
+          isLastPageOfChapter={isLastPageOfChapter}
           onPrevious={goToPrevious}
           onNext={goToNext}
           progressPercent={progressPercent}
+          bookId={book.id}
+          bookTitle={book.title}
+          chapterId={chapter.id}
+          chapterNumber={chapter.number}
+          position={position}
         />
       </div>
     </div>

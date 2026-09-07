@@ -244,7 +244,10 @@ export function ReaderContent({
       if (!viewport) return;
 
       const targetPage = Math.max(0, Math.min(nextPage, pageCount - 1));
-      viewport.scrollLeft = targetPage * (viewport.clientWidth + COLUMN_GAP);
+      viewport.scrollTo({
+        left: targetPage * (viewport.clientWidth + COLUMN_GAP),
+        behavior: "smooth",
+      });
       setPageIndex(targetPage);
 
       requestAnimationFrame(() => {
@@ -419,23 +422,23 @@ export function ReaderContent({
     : 0;
 
   return (
-    <section className="py-4 md:py-6 select-text">
-      <div className="mb-3 flex items-center justify-between text-sm text-reader-muted">
+    <section className="flex-1 flex flex-col min-h-0 py-1 md:py-3 select-text overflow-hidden">
+      <div className="mb-2 flex items-center justify-between text-xs md:text-sm text-reader-muted shrink-0">
         <span>
           Страница {pageIndex + 1} из {pageCount}
         </span>
-        <div className="flex items-center gap-2" aria-label="Размер текста">
+        <div className="flex items-center gap-1.5 md:gap-2" aria-label="Размер текста">
           <button
             type="button"
             onClick={() => setFontSize((size) => Math.max(14, size - 1))}
-            className="rounded border border-reader-text/20 px-2 py-1 hover:border-reader-text/40 active:scale-95"
+            className="flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-lg border border-reader-text/20 text-xs font-semibold hover:border-reader-text/40 active:scale-95 transition-colors"
           >
             A−
           </button>
           <button
             type="button"
             onClick={() => setFontSize((size) => Math.min(24, size + 1))}
-            className="rounded border border-reader-text/20 px-2 py-1 hover:border-reader-text/40 active:scale-95"
+            className="flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-lg border border-reader-text/20 text-xs font-semibold hover:border-reader-text/40 active:scale-95 transition-colors"
           >
             A+
           </button>
@@ -447,7 +450,7 @@ export function ReaderContent({
         onTouchEnd={handleTouchEnd}
         onMouseUp={captureSelection}
         onPointerUp={captureSelection}
-        className="h-[calc(100dvh-15rem)] md:h-[calc(100vh-22rem)] min-h-[300px] overflow-x-auto overflow-y-hidden select-text touch-pan-y"
+        className="flex-1 h-full min-h-0 overflow-x-auto overflow-y-hidden select-text touch-pan-y scroll-smooth"
         style={{ scrollbarWidth: "none" }}
       >
         <div
