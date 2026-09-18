@@ -2,7 +2,7 @@ import Link from "next/link";
 import { NoteItem } from "@/components/notes/NoteItem";
 import { NotesOnboarding } from "@/components/notes/NotesOnboarding";
 import { highlightTypes, isHighlightType } from "@/lib/highlights/types";
-import { DEMO_USER_ID } from "@/lib/mock-data";
+import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { listUserHighlights } from "@/server/highlights/queries";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +13,9 @@ export default async function NotesPage({
   searchParams: Promise<{ type?: string }>;
 }) {
   const { type: typeParam } = await searchParams;
+  const userId = await getCurrentUserId();
   const selectedType = isHighlightType(typeParam) ? typeParam : undefined;
-  const notes = await listUserHighlights(DEMO_USER_ID, selectedType);
+  const notes = await listUserHighlights(userId, selectedType);
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-16">

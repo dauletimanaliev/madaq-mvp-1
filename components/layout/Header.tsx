@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 
 const navItems = [
   {
@@ -44,6 +45,7 @@ const navItems = [
 
 export function Header() {
   const pathname = usePathname();
+  const { data: session } = useSession();
   const isReaderPage = pathname?.includes("/read");
 
   if (isReaderPage) {
@@ -58,26 +60,50 @@ export function Header() {
           <Link href="/" className="font-serif text-xl tracking-tight font-medium">
             Madaq
           </Link>
-          <nav className="hidden md:flex gap-6 text-sm text-ink-muted">
-            {navItems.map((item) => {
-              const isActive =
-                item.href === "/"
-                  ? pathname === "/"
-                  : pathname?.startsWith(item.href);
+          <div className="hidden md:flex items-center gap-6">
+            <nav className="flex gap-6 text-sm text-ink-muted">
+              {navItems.map((item) => {
+                const isActive =
+                  item.href === "/"
+                    ? pathname === "/"
+                    : pathname?.startsWith(item.href);
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`transition-colors py-1 ${
-                    isActive ? "text-ink font-medium" : "hover:text-ink"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`transition-colors py-1 ${
+                      isActive ? "text-ink font-medium" : "hover:text-ink"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+            {session?.user ? (
+              <Link href="/profile" className="flex items-center gap-2 ml-2">
+                {session.user.image ? (
+                  <img
+                    src={session.user.image}
+                    alt=""
+                    className="h-7 w-7 rounded-full border border-border"
+                  />
+                ) : (
+                  <div className="h-7 w-7 rounded-full bg-accent-soft border border-border flex items-center justify-center text-xs font-medium text-accent">
+                    {(session.user.name?.[0] ?? "?").toUpperCase()}
+                  </div>
+                )}
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                className="ml-2 rounded-lg border border-border px-3 py-1.5 text-sm text-ink-muted transition-colors hover:border-accent/30 hover:text-ink"
+              >
+                Войти
+              </Link>
+            )}
+          </div>
         </div>
       </header>
 
@@ -93,10 +119,14 @@ export function Header() {
                 ? pathname === "/"
                 : pathname?.startsWith(item.href);
 
+            // For profile tab: show avatar if logged in
+            const isProfileTab = item.href === "/profile";
+            const showAvatar = isProfileTab && session?.user?.image;
+
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={session?.user ? item.href : (isProfileTab ? "/login" : item.href)}
                 className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-lg text-xs transition-colors ${
                   isActive
                     ? "text-ink font-semibold bg-paper-soft"
@@ -104,9 +134,17 @@ export function Header() {
                 }`}
               >
                 <div className={isActive ? "text-accent" : "text-ink-muted"}>
-                  {item.icon}
+                  {showAvatar ? (
+                    <img
+                      src={session?.user?.image ?? ""}
+                      alt=""
+                      className="h-5 w-5 rounded-full border border-border"
+                    />
+                  ) : (
+                    item.icon
+                  )}
                 </div>
-                <span>{item.label}</span>
+                <span>{isProfileTab && !session?.user ? "Войти" : item.label}</span>
               </Link>
             );
           })}

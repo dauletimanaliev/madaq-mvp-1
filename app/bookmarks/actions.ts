@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { DEMO_USER_ID } from "@/lib/mock-data";
+import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { deleteBookmark } from "@/server/bookmarks/queries";
 
 export async function removeBookmark(formData: FormData) {
@@ -11,8 +11,9 @@ export async function removeBookmark(formData: FormData) {
     return;
   }
 
+  const userId = await getCurrentUserId();
   try {
-    const deleted = await deleteBookmark(DEMO_USER_ID, bookmarkId);
+    const deleted = await deleteBookmark(userId, bookmarkId);
     if (deleted) revalidatePath("/bookmarks");
   } catch (error) {
     console.error("Unable to delete bookmark.", error);

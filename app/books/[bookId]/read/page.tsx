@@ -3,7 +3,7 @@ import { getBookById } from "@/server/books/queries";
 import { getChaptersByBook, getChapterByNumber } from "@/server/chapters/queries";
 import { getProgress } from "@/server/progress/queries";
 import { listHighlights } from "@/server/highlights/queries";
-import { DEMO_USER_ID } from "@/lib/mock-data";
+import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { Reader } from "@/components/reader/Reader";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +18,12 @@ export default async function ReadPage({
   const { bookId } = await params;
   const { chapter: chapterParam, at } = await searchParams;
 
+  const userId = await getCurrentUserId();
+
   const [book, chapters, savedProgress] = await Promise.all([
     getBookById(bookId),
     getChaptersByBook(bookId),
-    getProgress(DEMO_USER_ID, bookId),
+    getProgress(userId, bookId),
   ]);
 
   if (!book || chapters.length === 0) notFound();
@@ -34,7 +36,7 @@ export default async function ReadPage({
   const chapter = (await getChapterByNumber(bookId, chapterNumber)) ?? chapters[0];
   if (!chapter) notFound();
 
-  const highlights = await listHighlights(DEMO_USER_ID, chapter.id);
+  const highlights = await listHighlights(userId, chapter.id);
 
   const initialPosition =
     at === "end"

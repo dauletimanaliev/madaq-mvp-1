@@ -1,11 +1,12 @@
-import { DEMO_USER_ID } from "@/lib/mock-data";
+import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { listBookmarks } from "@/server/bookmarks/queries";
 import { BookmarkItem } from "@/components/bookmarks/BookmarkItem";
 
 export const dynamic = "force-dynamic";
 
 export default async function BookmarksPage() {
-  const bookmarks = await listBookmarks(DEMO_USER_ID);
+  const userId = await getCurrentUserId();
+  const bookmarks = await listBookmarks(userId);
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-16">

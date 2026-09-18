@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { DEMO_USER_ID } from "@/lib/mock-data";
+import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { deleteHighlight } from "@/server/highlights/queries";
 
 export async function removeHighlight(formData: FormData) {
@@ -11,8 +11,9 @@ export async function removeHighlight(formData: FormData) {
     return;
   }
 
+  const userId = await getCurrentUserId();
   try {
-    const deleted = await deleteHighlight(DEMO_USER_ID, highlightId);
+    const deleted = await deleteHighlight(userId, highlightId);
     if (deleted) revalidatePath("/notes");
   } catch (error) {
     console.error("Unable to delete highlight.", error);
