@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getBookById } from "@/server/books/queries";
-import { getChaptersByBook, getChapterByNumber } from "@/server/chapters/queries";
+import { getChapterMetrics, getChapterByNumber } from "@/server/chapters/queries";
 import { getProgress } from "@/server/progress/queries";
 import { listHighlights } from "@/server/highlights/queries";
 import { getCurrentUserId } from "@/lib/auth/get-current-user";
@@ -20,20 +20,23 @@ export default async function ReadPage({
 
   const userId = await getCurrentUserId();
 
-  const [book, chapters, savedProgress] = await Promise.all([
+  const [book, chapterMetrics, savedProgress] = await Promise.all([
     getBookById(bookId),
-    getChaptersByBook(bookId),
+    getChapterMetrics(bookId),
     getProgress(userId, bookId),
   ]);
 
-  if (!book || chapters.length === 0) notFound();
+  if (!book || chapterMetrics.length === 0) notFound();
 
-  const savedChapter = chapters.find(
+  const savedChapter = chapterMetrics.find(
     (candidate) => candidate.id === savedProgress?.chapterId
   );
   const parsedNumber = Number(chapterParam ?? savedChapter?.number ?? 1);
-  const chapterNumber = Number.isInteger(parsedNumber) && parsedNumber > 0 ? parsedNumber : 1;
-  const chapter = (await getChapterByNumber(bookId, chapterNumber)) ?? chapters[0];
+  const chapterNumber =
+    Number.isInteger(parsedNumber) && parsedNumber > 0 ? parsedNumber : 1;
+  const chapter =
+    (await getChapterByNumber(bookId, chapterNumber)) ??
+    (await getChapterByNumber(bookId, chapterMetrics[0].number));
   if (!chapter) notFound();
 
   const highlights = await listHighlights(userId, chapter.id);
@@ -47,14 +50,10 @@ export default async function ReadPage({
 
   return (
     <Reader
-      key={`${chapter.id}:${initialPosition}`}
+      key={book.id}
       book={book}
-      chapter={chapter}
-      chapterMetrics={chapters.map((item) => ({
-        id: item.id,
-        number: item.number,
-        contentLength: item.content.length,
-      }))}
+      initialChapter={chapter}
+      chapterMetrics={chapterMetrics}
       initialPosition={initialPosition}
       initialHighlights={highlights}
     />

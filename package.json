@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "db:cleanup-demo-book": "node prisma/scripts/delete-demo-book.mjs",
-    "storage:upload-new-cafe-guest-cover": "node prisma/scripts/upload-new-cafe-guest-cover.mjs"
+    "storage:upload-new-cafe-guest-cover": "node prisma/scripts/upload-new-cafe-guest-cover.mjs",
+    "import:book": "node scripts/import-book.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

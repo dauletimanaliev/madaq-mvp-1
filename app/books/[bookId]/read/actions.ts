@@ -1,5 +1,7 @@
 "use server";
 
+import { getChapterByNumber } from "@/server/chapters/queries";
+import { listHighlights } from "@/server/highlights/queries";
 import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { upsertProgress } from "@/server/progress/queries";
 import { createBookmark } from "@/server/bookmarks/queries";
@@ -8,7 +10,20 @@ import {
   deleteHighlight,
   updateHighlightType,
 } from "@/server/highlights/queries";
-import type { Bookmark, Highlight, HighlightType } from "@/lib/types";
+import type { Bookmark, Chapter, Highlight, HighlightType } from "@/lib/types";
+
+export async function fetchChapterData(
+  bookId: string,
+  chapterNumber: number
+): Promise<{ chapter: Chapter; highlights: Highlight[] } | null> {
+  const chapter = await getChapterByNumber(bookId, chapterNumber);
+  if (!chapter) return null;
+
+  const userId = await getCurrentUserId();
+  const highlights = await listHighlights(userId, chapter.id);
+
+  return { chapter, highlights };
+}
 
 export async function saveProgress(input: {
   bookId: string;

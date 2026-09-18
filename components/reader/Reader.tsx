@@ -1,46 +1,94 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Book, Chapter, Highlight } from "@/lib/types";
 import { ReaderHeader } from "./ReaderHeader";
 import { ReaderContent } from "./ReaderContent";
 import { ReaderControls } from "./ReaderControls";
-import { saveProgress } from "@/app/books/[bookId]/read/actions";
+import { fetchChapterData, saveProgress } from "@/app/books/[bookId]/read/actions";
 import { HighlightMenu, type SelectionRange } from "./HighlightMenu";
+import type { ChapterMetric } from "@/server/chapters/queries";
 
 export function Reader({
   book,
-  chapter,
+  initialChapter,
   chapterMetrics,
   initialPosition,
   initialHighlights,
 }: {
   book: Book;
-  chapter: Chapter;
-  chapterMetrics: { id: string; number: number; contentLength: number }[];
+  initialChapter: Chapter;
+  chapterMetrics: ChapterMetric[];
   initialPosition: number;
   initialHighlights: Highlight[];
 }) {
-  const router = useRouter();
-  const [isNavigating, startTransition] = useTransition();
+  const [chapter, setChapter] = useState<Chapter>(initialChapter);
+  const [highlights, setHighlights] = useState<Highlight[]>(initialHighlights);
   const [position, setPosition] = useState(initialPosition);
+  const [contentInitialPos, setContentInitialPos] = useState(initialPosition);
+  const [contentKey, setContentKey] = useState(
+    () => `${initialChapter.id}:${initialPosition}`
+  );
+  const [isLoadingChapter, setIsLoadingChapter] = useState(false);
+
   const [pageState, setPageState] = useState({
     hasPreviousPage: false,
     hasNextPage: false,
   });
-  const [highlights, setHighlights] = useState(initialHighlights);
   const [selectedRange, setSelectedRange] = useState<SelectionRange | null>(null);
   const [highlightError, setHighlightError] = useState<string | null>(null);
 
-  const chapterIndex = chapterMetrics.findIndex((item) => item.id === chapter.id);
+  // In-memory chapter cache for instant 0ms switching
+  const chapterCache = useRef<
+    Map<number, { chapter: Chapter; highlights: Highlight[] }>
+  >(
+    new Map([
+      [
+        initialChapter.number,
+        { chapter: initialChapter, highlights: initialHighlights },
+      ],
+    ])
+  );
+
+  const chapterIndex = chapterMetrics.findIndex(
+    (item) => item.id === chapter.id
+  );
+  const previousChapter = chapterMetrics[chapterIndex - 1];
+  const nextChapter = chapterMetrics[chapterIndex + 1];
+
+  // Prefetch adjacent chapters (N-1, N+1) in the background
+  const prefetchChapter = useCallback(
+    async (chapterNum: number) => {
+      if (chapterCache.current.has(chapterNum)) return;
+      try {
+        const data = await fetchChapterData(book.id, chapterNum);
+        if (data) {
+          chapterCache.current.set(chapterNum, data);
+        }
+      } catch (err) {
+        console.error("Failed to prefetch chapter", chapterNum, err);
+      }
+    },
+    [book.id]
+  );
+
+  useEffect(() => {
+    const currentNum = chapter.number;
+    const prevMetric = chapterMetrics.find((m) => m.number === currentNum - 1);
+    const nextMetric = chapterMetrics.find((m) => m.number === currentNum + 1);
+
+    if (prevMetric) prefetchChapter(prevMetric.number);
+    if (nextMetric) prefetchChapter(nextMetric.number);
+  }, [chapter.number, chapterMetrics, prefetchChapter]);
+
+  // Reading progress calculation across entire book
   const progressPercent = useMemo(() => {
     const totalLength = chapterMetrics.reduce(
       (total, item) => total + item.contentLength,
       0
     );
     const completedLength = chapterMetrics
-      .slice(0, chapterIndex)
+      .slice(0, chapterIndex >= 0 ? chapterIndex : 0)
       .reduce((total, item) => total + item.contentLength, 0);
 
     return totalLength === 0
@@ -48,6 +96,7 @@ export function Reader({
       : ((completedLength + position) / totalLength) * 100;
   }, [chapterIndex, chapterMetrics, position]);
 
+  // Debounced progress saving
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       void saveProgress({
@@ -61,64 +110,107 @@ export function Reader({
     return () => window.clearTimeout(timeout);
   }, [book.id, chapter.id, position, progressPercent]);
 
-  const previousChapter = chapterMetrics[chapterIndex - 1];
-  const nextChapter = chapterMetrics[chapterIndex + 1];
+  // Instant chapter switching
+  const switchToChapter = useCallback(
+    async (chapterNum: number, target: "start" | "end" = "start") => {
+      const cached = chapterCache.current.get(chapterNum);
+      if (cached) {
+        const targetPos = target === "end" ? cached.chapter.content.length : 0;
+        setChapter(cached.chapter);
+        setHighlights(cached.highlights);
+        setPosition(targetPos);
+        setContentInitialPos(targetPos);
+        setContentKey(`${cached.chapter.id}:${target}:${Date.now()}`);
+        setSelectedRange(null);
+        setHighlightError(null);
 
+        const url = `/books/${book.id}/read?chapter=${chapterNum}${
+          target === "end" ? "&at=end" : ""
+        }`;
+        window.history.replaceState(null, "", url);
+        return;
+      }
+
+      setIsLoadingChapter(true);
+      try {
+        const data = await fetchChapterData(book.id, chapterNum);
+        if (data) {
+          chapterCache.current.set(chapterNum, data);
+          const targetPos = target === "end" ? data.chapter.content.length : 0;
+          setChapter(data.chapter);
+          setHighlights(data.highlights);
+          setPosition(targetPos);
+          setContentInitialPos(targetPos);
+          setContentKey(`${data.chapter.id}:${target}:${Date.now()}`);
+          setSelectedRange(null);
+          setHighlightError(null);
+
+          const url = `/books/${book.id}/read?chapter=${chapterNum}${
+            target === "end" ? "&at=end" : ""
+          }`;
+          window.history.replaceState(null, "", url);
+        }
+      } catch (err) {
+        console.error("Failed to load chapter:", err);
+      } finally {
+        setIsLoadingChapter(false);
+      }
+    },
+    [book.id]
+  );
+
+  // Handle browser back/forward buttons
   useEffect(() => {
-    if (previousChapter) {
-      router.prefetch(`/books/${book.id}/read?chapter=${previousChapter.number}&at=end`);
+    function handlePopState() {
+      const searchParams = new URLSearchParams(window.location.search);
+      const chParam = searchParams.get("chapter");
+      const atParam = searchParams.get("at");
+      const chNum = chParam ? Number(chParam) : 1;
+      if (chNum && chNum !== chapter.number) {
+        switchToChapter(chNum, atParam === "end" ? "end" : "start");
+      }
     }
-    if (nextChapter) {
-      router.prefetch(`/books/${book.id}/read?chapter=${nextChapter.number}`);
-    }
-  }, [book.id, nextChapter, previousChapter, router]);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [chapter.number, switchToChapter]);
 
   const canGoPrevious = pageState.hasPreviousPage || Boolean(previousChapter);
   const canGoNext = pageState.hasNextPage || Boolean(nextChapter);
   const isLastPageOfChapter = !pageState.hasNextPage && Boolean(nextChapter);
+
+  const handleNextChapter = useCallback(() => {
+    if (nextChapter) {
+      switchToChapter(nextChapter.number, "start");
+    }
+  }, [nextChapter, switchToChapter]);
+
+  const handlePreviousChapter = useCallback(() => {
+    if (previousChapter) {
+      switchToChapter(previousChapter.number, "end");
+    }
+  }, [previousChapter, switchToChapter]);
 
   const goToPrevious = useCallback(() => {
     if (pageState.hasPreviousPage) {
       window.dispatchEvent(new Event("reader:previous-page"));
       return;
     }
-
     if (previousChapter) {
-      startTransition(() => {
-        router.push(`/books/${book.id}/read?chapter=${previousChapter.number}&at=end`);
-      });
+      handlePreviousChapter();
     }
-  }, [book.id, pageState.hasPreviousPage, previousChapter, router]);
+  }, [handlePreviousChapter, pageState.hasPreviousPage, previousChapter]);
 
   const goToNext = useCallback(() => {
     if (pageState.hasNextPage) {
       window.dispatchEvent(new Event("reader:next-page"));
       return;
     }
-
     if (nextChapter) {
-      startTransition(() => {
-        router.push(`/books/${book.id}/read?chapter=${nextChapter.number}`);
-      });
+      handleNextChapter();
     }
-  }, [book.id, nextChapter, pageState.hasNextPage, router]);
+  }, [handleNextChapter, nextChapter, pageState.hasNextPage]);
 
-  const handleNextChapter = useCallback(() => {
-    if (nextChapter) {
-      startTransition(() => {
-        router.push(`/books/${book.id}/read?chapter=${nextChapter.number}`);
-      });
-    }
-  }, [book.id, nextChapter, router]);
-
-  const handlePreviousChapter = useCallback(() => {
-    if (previousChapter) {
-      startTransition(() => {
-        router.push(`/books/${book.id}/read?chapter=${previousChapter.number}&at=end`);
-      });
-    }
-  }, [book.id, previousChapter, router]);
-
+  // Keyboard navigation
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (
@@ -143,8 +235,8 @@ export function Reader({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-reader-bg text-reader-text overflow-hidden">
-      {/* Top Loading Progress Line when changing chapters */}
-      {isNavigating && (
+      {/* Top Loading Progress Line when fetching non-cached chapter */}
+      {isLoadingChapter && (
         <div className="fixed top-0 inset-x-0 h-1 bg-amber-400 z-50 animate-pulse shadow-md" />
       )}
 
@@ -156,8 +248,9 @@ export function Reader({
         />
 
         <ReaderContent
+          key={contentKey}
           content={chapter.content}
-          initialPosition={initialPosition}
+          initialPosition={contentInitialPos}
           highlights={highlights}
           onPositionChange={setPosition}
           onPaginationChange={setPageState}
