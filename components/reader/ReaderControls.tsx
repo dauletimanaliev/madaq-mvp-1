@@ -33,12 +33,12 @@ export function ReaderControls({
         type="button"
         onClick={onPrevious}
         disabled={!canGoPrevious}
-        className="flex min-h-10 items-center gap-1 rounded-lg px-2.5 hover:text-reader-text active:scale-95 disabled:cursor-not-allowed disabled:opacity-0 transition-all font-medium"
+        className="hidden md:flex min-h-10 items-center gap-1 rounded-lg px-2.5 hover:text-reader-text active:scale-95 disabled:cursor-not-allowed disabled:opacity-0 transition-all font-medium"
       >
         ← Назад
       </button>
 
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2.5 mx-auto md:mx-0">
         <BookmarkButton
           bookId={bookId}
           bookTitle={bookTitle}
@@ -47,13 +47,18 @@ export function ReaderControls({
           position={position}
         />
         <span className="font-mono text-xs text-reader-muted">{Math.round(progressPercent)}%</span>
+        {isLastPageOfChapter && (
+          <span className="md:hidden text-[11px] text-amber-300/90 font-medium ml-1">
+            Свайп влево для след. главы →
+          </span>
+        )}
       </div>
 
       <button
         type="button"
         onClick={onNext}
         disabled={!canGoNext}
-        className={`flex min-h-10 items-center gap-1 rounded-lg px-2.5 transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-0 font-medium ${
+        className={`hidden md:flex min-h-10 items-center gap-1 rounded-lg px-2.5 transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-0 font-medium ${
           isLastPageOfChapter
             ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold shadow-sm hover:bg-amber-500/30"
             : "hover:text-reader-text"

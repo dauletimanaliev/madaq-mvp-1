@@ -36,19 +36,6 @@ function getParagraphs(content: string): Paragraph[] {
   });
 }
 
-function getCaretRange(x: number, y: number): Range | null {
-  if ("caretPositionFromPoint" in document) {
-    const position = document.caretPositionFromPoint(x, y);
-    if (position) {
-      const range = document.createRange();
-      range.setStart(position.offsetNode, position.offset);
-      range.collapse(true);
-      return range;
-    }
-  }
-
-  return document.caretRangeFromPoint?.(x, y) ?? null;
-}
 
 const highlightNames = {
   protein: "madaq-highlight-protein",
@@ -91,6 +78,8 @@ export function ReaderContent({
   onPositionChange,
   onPaginationChange,
   onSelectionChange,
+  onNextChapter,
+  onPreviousChapter,
 }: {
   content: string;
   initialPosition: number;
@@ -107,10 +96,11 @@ export function ReaderContent({
     bottomRect?: DOMRect;
     existingHighlight?: Highlight | null;
   } | null) => void;
+  onNextChapter?: () => void;
+  onPreviousChapter?: () => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<HTMLDivElement>(null);
-  const markerRef = useRef<HTMLSpanElement>(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [pageCount, setPageCount] = useState(1);
   const [pageWidth, setPageWidth] = useState(1);
@@ -123,7 +113,6 @@ export function ReaderContent({
   const updatePagination = useCallback(() => {
     const viewport = viewportRef.current;
     const flow = flowRef.current;
-    const marker = markerRef.current;
     if (!viewport || !flow || viewport.clientWidth === 0) return;
 
     if (pageWidth !== viewport.clientWidth) {
@@ -136,14 +125,18 @@ export function ReaderContent({
       1,
       Math.round((flow.scrollWidth + COLUMN_GAP) / step)
     );
-    const markerPage = marker
-      ? Math.min(nextPageCount - 1, Math.floor(marker.offsetLeft / step))
-      : 0;
 
-    viewport.scrollLeft = markerPage * step;
-    setPageIndex(markerPage);
+    // Maintain proportional page based on current reading position
+    const ratio = content.length > 0 ? position / content.length : 0;
+    const targetPage = Math.min(
+      nextPageCount - 1,
+      Math.round(ratio * (nextPageCount - 1))
+    );
+
+    viewport.scrollLeft = targetPage * step;
+    setPageIndex(targetPage);
     setPageCount(nextPageCount);
-  }, [pageWidth]);
+  }, [content.length, pageWidth, position]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -159,7 +152,7 @@ export function ReaderContent({
       cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [fontSize, position, pageWidth, updatePagination]);
+  }, [fontSize, pageWidth, updatePagination]);
 
   useLayoutEffect(() => {
     const flow = flowRef.current;
@@ -245,30 +238,18 @@ export function ReaderContent({
       if (!viewport) return;
 
       const targetPage = Math.max(0, Math.min(nextPage, pageCount - 1));
+      const step = viewport.clientWidth + COLUMN_GAP;
       viewport.scrollTo({
-        left: targetPage * (viewport.clientWidth + COLUMN_GAP),
+        left: targetPage * step,
         behavior: "smooth",
       });
       setPageIndex(targetPage);
 
-      requestAnimationFrame(() => {
-        const bounds = viewport.getBoundingClientRect();
-        const range = getCaretRange(bounds.left + 12, bounds.top + 12);
-        const flow = flowRef.current;
-        let nextPosition: number | null = null;
-
-        if (range && flow) {
-          try {
-            nextPosition = domRangeToCanonicalOffsets(range, flow).startPosition;
-          } catch {
-            nextPosition = null;
-          }
-        }
-
-        if (nextPosition !== null) {
-          setPosition(clampPosition(nextPosition, content.length));
-        }
-      });
+      const estimatedPosition =
+        pageCount > 1
+          ? Math.round((targetPage / (pageCount - 1)) * content.length)
+          : 0;
+      setPosition(clampPosition(estimatedPosition, content.length));
     },
     [content.length, pageCount]
   );
@@ -374,33 +355,29 @@ export function ReaderContent({
     if (!start || e.changedTouches.length === 0) return;
 
     const selection = window.getSelection();
-    if (selection && !selection.isCollapsed) return;
+    if (selection && !selection.isCollapsed && selection.toString().trim().length > 0) return;
 
     const touch = e.changedTouches[0];
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
     const duration = Date.now() - start.time;
 
-    if (Math.abs(dx) > 40 && Math.abs(dy) < 60 && duration < 500) {
+    // Detect horizontal swipe gesture
+    if (Math.abs(dx) > 35 && Math.abs(dx) > Math.abs(dy) * 1.2 && duration < 600) {
       if (dx < 0) {
-        goToPage(pageIndex + 1);
+        // Swipe left -> Next page or Next chapter
+        if (pageIndex < pageCount - 1) {
+          goToPage(pageIndex + 1);
+        } else if (onNextChapter) {
+          onNextChapter();
+        }
       } else {
-        goToPage(pageIndex - 1);
-      }
-      return;
-    }
-
-    if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && duration < 300) {
-      const viewport = viewportRef.current;
-      if (!viewport) return;
-      const rect = viewport.getBoundingClientRect();
-      const clickX = touch.clientX - rect.left;
-      const widthRatio = clickX / rect.width;
-
-      if (widthRatio > 0.8) {
-        goToPage(pageIndex + 1);
-      } else if (widthRatio < 0.2) {
-        goToPage(pageIndex - 1);
+        // Swipe right -> Previous page or Previous chapter
+        if (pageIndex > 0) {
+          goToPage(pageIndex - 1);
+        } else if (onPreviousChapter) {
+          onPreviousChapter();
+        }
       }
     }
   };
@@ -415,18 +392,6 @@ export function ReaderContent({
       window.removeEventListener("reader:next-page", next);
     };
   }, [goToPage, pageIndex]);
-
-  const markerParagraph = paragraphs.find(
-    (paragraph) =>
-      position >= paragraph.start &&
-      position <= paragraph.start + paragraph.text.length
-  ) ?? paragraphs.at(-1);
-  const markerOffset = markerParagraph
-    ? Math.min(
-        clampPosition(position - markerParagraph.start, markerParagraph.text.length),
-        Math.max(0, markerParagraph.text.length - 1)
-      )
-    : 0;
 
   return (
     <section className="flex-1 flex flex-col min-h-0 py-1 md:py-3 select-text overflow-hidden">
@@ -457,7 +422,7 @@ export function ReaderContent({
         onTouchEnd={handleTouchEnd}
         onMouseUp={captureSelection}
         onPointerUp={captureSelection}
-        className="flex-1 h-full min-h-0 overflow-x-auto overflow-y-hidden select-text touch-pan-y scroll-smooth"
+        className="flex-1 h-full min-h-0 overflow-x-hidden overflow-y-hidden select-text touch-pan-y"
         style={{ scrollbarWidth: "none" }}
       >
         <div
@@ -474,13 +439,7 @@ export function ReaderContent({
         >
           {paragraphs.map((paragraph) => (
             <p key={paragraph.start} data-start={paragraph.start} className="mb-5 select-text">
-              {paragraph === markerParagraph
-                ? paragraph.text.slice(0, markerOffset)
-                : paragraph.text}
-              {paragraph === markerParagraph && (
-                <span ref={markerRef} aria-hidden="true" className="inline-block w-0" />
-              )}
-              {paragraph === markerParagraph && paragraph.text.slice(markerOffset)}
+              {paragraph.text}
             </p>
           ))}
         </div>

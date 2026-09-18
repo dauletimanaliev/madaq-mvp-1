@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Book, Chapter, Highlight } from "@/lib/types";
 import { ReaderHeader } from "./ReaderHeader";
@@ -77,7 +77,7 @@ export function Reader({
   const canGoNext = pageState.hasNextPage || Boolean(nextChapter);
   const isLastPageOfChapter = !pageState.hasNextPage && Boolean(nextChapter);
 
-  function goToPrevious() {
+  const goToPrevious = useCallback(() => {
     if (pageState.hasPreviousPage) {
       window.dispatchEvent(new Event("reader:previous-page"));
       return;
@@ -88,9 +88,9 @@ export function Reader({
         router.push(`/books/${book.id}/read?chapter=${previousChapter.number}&at=end`);
       });
     }
-  }
+  }, [book.id, pageState.hasPreviousPage, previousChapter, router]);
 
-  function goToNext() {
+  const goToNext = useCallback(() => {
     if (pageState.hasNextPage) {
       window.dispatchEvent(new Event("reader:next-page"));
       return;
@@ -101,7 +101,45 @@ export function Reader({
         router.push(`/books/${book.id}/read?chapter=${nextChapter.number}`);
       });
     }
-  }
+  }, [book.id, nextChapter, pageState.hasNextPage, router]);
+
+  const handleNextChapter = useCallback(() => {
+    if (nextChapter) {
+      startTransition(() => {
+        router.push(`/books/${book.id}/read?chapter=${nextChapter.number}`);
+      });
+    }
+  }, [book.id, nextChapter, router]);
+
+  const handlePreviousChapter = useCallback(() => {
+    if (previousChapter) {
+      startTransition(() => {
+        router.push(`/books/${book.id}/read?chapter=${previousChapter.number}&at=end`);
+      });
+    }
+  }, [book.id, previousChapter, router]);
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+      if (e.key === "ArrowRight" || e.key === "PageDown") {
+        e.preventDefault();
+        goToNext();
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        goToPrevious();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [goToNext, goToPrevious]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-reader-bg text-reader-text overflow-hidden">
@@ -124,6 +162,8 @@ export function Reader({
           onPositionChange={setPosition}
           onPaginationChange={setPageState}
           onSelectionChange={setSelectedRange}
+          onNextChapter={handleNextChapter}
+          onPreviousChapter={handlePreviousChapter}
         />
 
         <HighlightMenu
