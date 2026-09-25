@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PDFParse } from "pdf-parse";
+import { extractText, getMeta } from "unpdf";
 import { prisma } from "@/lib/db/prisma";
 import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { parseBookText, normalizeContent } from "@/lib/books/parser";
@@ -68,38 +68,30 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const arrayBuffer = await file.arrayBuffer();
     let rawText: string;
     let pdfTitle: string | undefined;
 
     const ext = file.name.split(".").pop()?.toLowerCase();
 
     if (ext === "pdf" || file.type === "application/pdf") {
-      // pdf-parse v2 API: create instance with data, then call getText()
-      const parser = new PDFParse({
-        data: new Uint8Array(buffer),
-        verbosity: 0,
-      });
+      // unpdf: serverless-friendly PDF text extraction
+      const pdfData = new Uint8Array(arrayBuffer);
 
+      const { text } = await extractText(pdfData, { mergePages: true });
+      rawText = typeof text === "string" ? text : (text as string[]).join("\n");
+
+      // Try to get title from PDF metadata
       try {
-        // Get text content
-        const textResult = await parser.getText();
-        rawText = textResult.text;
-
-        // Try to get title from PDF metadata
-        try {
-          const infoResult = await parser.getInfo();
-          if (infoResult.info?.Title) {
-            pdfTitle = String(infoResult.info.Title);
-          }
-        } catch {
-          // Metadata extraction is optional
+        const { info } = await getMeta(pdfData);
+        if (info?.Title) {
+          pdfTitle = String(info.Title);
         }
-      } finally {
-        await parser.destroy();
+      } catch {
+        // Metadata extraction is optional
       }
     } else {
-      rawText = buffer.toString("utf-8");
+      rawText = Buffer.from(arrayBuffer).toString("utf-8");
     }
 
     if (!rawText || rawText.trim().length < 50) {
