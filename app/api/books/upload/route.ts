@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { extractText, getMeta } from "unpdf";
+import { extractTextItems, getMeta } from "unpdf";
 import { prisma } from "@/lib/db/prisma";
 import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { parseBookText, normalizeContent } from "@/lib/books/parser";
 import type { ParsedBook } from "@/lib/books/parser";
+import { pdfItemsToFormattedText, type TextItem } from "@/lib/books/pdf-formatter";
 
 export const maxDuration = 60; // allow up to 60s for large PDFs
 
@@ -75,11 +76,11 @@ export async function POST(request: NextRequest) {
     const ext = file.name.split(".").pop()?.toLowerCase();
 
     if (ext === "pdf" || file.type === "application/pdf") {
-      // unpdf: serverless-friendly PDF text extraction
+      // unpdf: serverless-friendly PDF text extraction with formatting
       const pdfData = new Uint8Array(arrayBuffer);
 
-      const { text } = await extractText(pdfData, { mergePages: true });
-      rawText = typeof text === "string" ? text : (text as string[]).join("\n");
+      const { items } = await extractTextItems(pdfData);
+      rawText = pdfItemsToFormattedText(items as TextItem[][]);
 
       // Try to get title from PDF metadata
       try {

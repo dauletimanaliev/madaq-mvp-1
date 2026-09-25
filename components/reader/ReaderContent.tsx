@@ -20,6 +20,7 @@ const COLUMN_GAP = 32;
 type Paragraph = {
   start: number;
   text: string;
+  tag: "p" | "h2" | "h3";
 };
 
 function clampPosition(position: number, contentLength: number) {
@@ -29,13 +30,72 @@ function clampPosition(position: number, contentLength: number) {
 function getParagraphs(content: string): Paragraph[] {
   let start = 0;
 
-  return content.split("\n\n").map((text) => {
-    const paragraph = { start, text };
-    start += text.length + 2;
+  return content.split("\n\n").map((rawText) => {
+    const paragraph = { start, text: rawText, tag: "p" as const };
+    start += rawText.length + 2;
+
+    // Detect heading markers: ## Heading or ### Heading
+    if (rawText.startsWith("### ")) {
+      return { ...paragraph, text: rawText.slice(4), tag: "h3" as const };
+    }
+    if (rawText.startsWith("## ")) {
+      return { ...paragraph, text: rawText.slice(3), tag: "h2" as const };
+    }
+
     return paragraph;
   });
 }
 
+/**
+ * Parses inline formatting markers and returns React nodes:
+ *   ***text*** → bold italic
+ *   **text**   → bold
+ *   *text*     → italic
+ */
+function renderFormattedText(text: string): React.ReactNode {
+  // Regex matches ***bold italic***, **bold**, and *italic*
+  const regex = /(\*{3})((?:(?!\*{3}).)+)\1|(\*{2})((?:(?!\*{2}).)+)\3|(\*)((?:(?!\*).)+)\5/g;
+
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+
+  while ((match = regex.exec(text)) !== null) {
+    // Add plain text before this match
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+
+    if (match[1] === "***") {
+      // Bold italic
+      parts.push(
+        <strong key={key++}>
+          <em>{match[2]}</em>
+        </strong>
+      );
+    } else if (match[3] === "**") {
+      // Bold
+      parts.push(<strong key={key++}>{match[4]}</strong>);
+    } else if (match[5] === "*") {
+      // Italic
+      parts.push(<em key={key++}>{match[6]}</em>);
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Remaining plain text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  // If no formatting found, return plain string (avoids unnecessary array wrapper)
+  if (parts.length === 0) return text;
+  if (parts.length === 1 && typeof parts[0] === "string") return parts[0];
+
+  return parts;
+}
 
 const highlightNames = {
   protein: "madaq-highlight-protein",
@@ -437,11 +497,40 @@ export function ReaderContent({
             height: "100%",
           }}
         >
-          {paragraphs.map((paragraph) => (
-            <p key={paragraph.start} data-start={paragraph.start} className="mb-5 select-text">
-              {paragraph.text}
-            </p>
-          ))}
+          {paragraphs.map((paragraph) => {
+            const inner = renderFormattedText(paragraph.text);
+            if (paragraph.tag === "h2") {
+              return (
+                <h2
+                  key={paragraph.start}
+                  data-start={paragraph.start}
+                  className="mb-6 mt-4 text-[1.3em] font-bold leading-snug select-text"
+                >
+                  {inner}
+                </h2>
+              );
+            }
+            if (paragraph.tag === "h3") {
+              return (
+                <h3
+                  key={paragraph.start}
+                  data-start={paragraph.start}
+                  className="mb-4 mt-3 text-[1.15em] font-semibold leading-snug select-text"
+                >
+                  {inner}
+                </h3>
+              );
+            }
+            return (
+              <p
+                key={paragraph.start}
+                data-start={paragraph.start}
+                className="mb-5 select-text"
+              >
+                {inner}
+              </p>
+            );
+          })}
         </div>
       </div>
     </section>
