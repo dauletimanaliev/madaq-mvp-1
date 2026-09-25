@@ -72,25 +72,33 @@ export async function POST(request: NextRequest) {
 
   try {
     const arrayBuffer = await file.arrayBuffer();
+    const fileBuffer = Buffer.from(arrayBuffer);
     let rawText: string;
     let pdfTitle: string | undefined;
     let pdfAuthor: string | undefined;
-    let pdfData: Uint8Array | null = null;
+    let coverBuffer: ArrayBuffer | null = null;
 
     const ext = file.name.split(".").pop()?.toLowerCase();
     const isPdf = ext === "pdf" || file.type === "application/pdf";
 
     if (isPdf) {
-      // Create a detached buffer to ensure structuredClone in PDF.js works in Node 22
-      const detachedBuffer = arrayBuffer.slice(0);
-      pdfData = new Uint8Array(detachedBuffer);
-
-      // Extract text with true font resolution (bold, italic, headings, chapter labels)
-      rawText = await extractPdfWithFormatting(pdfData);
-
-      // Try to get title & author from PDF metadata
+      // 1. Render cover image from page 1 using fresh Uint8Array
       try {
-        const { info } = await getMeta(pdfData);
+        coverBuffer = await renderPageAsImage(
+          Uint8Array.from(fileBuffer),
+          1,
+          {
+            width: 500,
+            canvasImport: () => import("@napi-rs/canvas"),
+          }
+        );
+      } catch (coverErr) {
+        console.error("Cover rendering error (page 1):", coverErr);
+      }
+
+      // 2. Try to get title & author from PDF metadata
+      try {
+        const { info } = await getMeta(Uint8Array.from(fileBuffer));
         if (info?.Title) {
           pdfTitle = String(info.Title);
         }
@@ -100,8 +108,11 @@ export async function POST(request: NextRequest) {
       } catch {
         // Metadata extraction is optional
       }
+
+      // 3. Extract text with true font resolution (bold, italic, headings, chapter labels)
+      rawText = await extractPdfWithFormatting(Uint8Array.from(fileBuffer));
     } else {
-      rawText = Buffer.from(arrayBuffer).toString("utf-8");
+      rawText = fileBuffer.toString("utf-8");
     }
 
     if (!rawText || rawText.trim().length < 50) {
@@ -182,50 +193,44 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Generate cover image from first page of PDF
+    // Save cover image if generated
     let coverUrl: string | null = null;
-    if (isPdf && pdfData) {
+    if (coverBuffer) {
       try {
-        const coverBuffer = await renderPageAsImage(pdfData, 1, {
-          width: 500,
-          canvasImport: () => import("@napi-rs/canvas"),
-        });
-        if (coverBuffer) {
-          const coversDir = path.join(process.cwd(), "public", "covers");
-          await fs.mkdir(coversDir, { recursive: true });
-          const coverPath = path.join(coversDir, `${bookId}.png`);
-          await fs.writeFile(coverPath, Buffer.from(coverBuffer as ArrayBuffer));
-          coverUrl = `/covers/${bookId}.png`;
+        const coversDir = path.join(process.cwd(), "public", "covers");
+        await fs.mkdir(coversDir, { recursive: true });
+        const coverPath = path.join(coversDir, `${bookId}.png`);
+        await fs.writeFile(coverPath, Buffer.from(coverBuffer as ArrayBuffer));
+        coverUrl = `/covers/${bookId}.png`;
 
-          // If Supabase service role key is present, upload to Supabase Storage as well
-          const supabaseUrl =
-            process.env.SUPABASE_URL || "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
-          const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-          if (serviceRoleKey) {
-            try {
-              const res = await fetch(
-                `${supabaseUrl}/storage/v1/object/book-covers/${bookId}/cover.png`,
-                {
-                  method: "POST",
-                  headers: {
-                    authorization: `Bearer ${serviceRoleKey}`,
-                    apikey: serviceRoleKey,
-                    "content-type": "image/png",
-                    "x-upsert": "true",
-                  },
-                  body: Buffer.from(coverBuffer as ArrayBuffer),
-                }
-              );
-              if (res.ok) {
-                coverUrl = `${supabaseUrl}/storage/v1/object/public/book-covers/${bookId}/cover.png`;
+        // If Supabase service role key is present, upload to Supabase Storage as well
+        const supabaseUrl =
+          process.env.SUPABASE_URL || "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
+        const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (serviceRoleKey) {
+          try {
+            const res = await fetch(
+              `${supabaseUrl}/storage/v1/object/book-covers/${bookId}/cover.png`,
+              {
+                method: "POST",
+                headers: {
+                  authorization: `Bearer ${serviceRoleKey}`,
+                  apikey: serviceRoleKey,
+                  "content-type": "image/png",
+                  "x-upsert": "true",
+                },
+                body: Buffer.from(coverBuffer as ArrayBuffer),
               }
-            } catch (storageErr) {
-              console.warn("Supabase cover upload fallback:", storageErr);
+            );
+            if (res.ok) {
+              coverUrl = `${supabaseUrl}/storage/v1/object/public/book-covers/${bookId}/cover.png`;
             }
+          } catch (storageErr) {
+            console.warn("Supabase cover upload fallback:", storageErr);
           }
         }
-      } catch (coverErr) {
-        console.error("Cover generation failed (non-critical):", coverErr);
+      } catch (saveErr) {
+        console.error("Cover saving failed (non-critical):", saveErr);
       }
     }
 
