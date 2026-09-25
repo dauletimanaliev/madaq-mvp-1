@@ -25,8 +25,9 @@ export function normalizeContent(raw: string): string {
 /**
  * Parses markdown or text content into chapters.
  * Matches patterns like:
- *   # Глава 1: Название
+ *   ### CHAPTER 1
  *   ## Chapter 2
+ *   # Глава 1: Название
  *   Глава 3. Встреча
  *   ГЛАВА 4
  */
@@ -35,38 +36,77 @@ export function parseBookText(rawText: string, defaultTitle?: string): ParsedBoo
 
   // Pattern for chapter headings:
   // Starts with line start or newline, optional markdown header (#, ##, ###),
-  // followed by "Глава", "Chapter", "ЧАСТЬ", etc., and chapter number/title
+  // followed by "Глава", "Chapter", "ЧАСТЬ", "INTRODUCTION", etc.
   const chapterRegex =
-    /(?:^|\n)(?:#{1,3}\s+)?(?:Глава|ГЛАВА|глава|Chapter|CHAPTER|Часть|ЧАСТЬ)\s+([0-9IVXLCDM]+|[а-яёА-ЯЁ\w]+)?(?::|\.|\s-|\s—)?\s*([^\n]*)/g;
+    /(?:^|\n)(?:(#{1,3})\s+)?(Глава|ГЛАВА|глава|Chapter|CHAPTER|Часть|ЧАСТЬ|INTRODUCTION|ВСТУПЛЕНИЕ|PROLOGUE|ПРОЛОГ|EPILOGUE|ЭПИЛОГ|CONCLUSION|ЗАКЛЮЧЕНИЕ)(?:\s+([0-9IVXLCDM]+|[а-яёА-ЯЁ\w]+))?(?::|\.|\s-|\s—)?\s*([^\n]*)/g;
 
-  const matches: { index: number; length: number; numberStr: string; titleStr: string }[] = [];
+  type RawMatch = {
+    index: number;
+    length: number;
+    hasMdHash: boolean;
+    keyword: string;
+    numberStr: string;
+    titleStr: string;
+    fullMatch: string;
+  };
+
+  let allMatches: RawMatch[] = [];
   let match: RegExpExecArray | null;
 
   while ((match = chapterRegex.exec(text)) !== null) {
-    matches.push({
+    allMatches.push({
       index: match.index,
       length: match[0].length,
-      numberStr: (match[1] || "").trim(),
-      titleStr: (match[2] || "").trim(),
+      hasMdHash: Boolean(match[1]),
+      keyword: match[2],
+      numberStr: (match[3] || "").trim(),
+      titleStr: (match[4] || "").trim(),
+      fullMatch: match[0].trim(),
     });
   }
 
-  // If no explicit chapter headers found, try splitting by top-level Markdown headers `# `
-  if (matches.length < 2) {
+  // Filter out Table of Contents matches:
+  // In a TOC, chapter headers appear in rapid succession (distance between consecutive markers < 250 chars)
+  const validMatches: RawMatch[] = [];
+  for (let i = 0; i < allMatches.length; i++) {
+    const cur = allMatches[i];
+    const nxt = allMatches[i + 1];
+
+    // If next match is within 250 characters, it's almost certainly a TOC line or duplicate
+    if (nxt && nxt.index - cur.index < 250) {
+      continue;
+    }
+
+    validMatches.push(cur);
+  }
+
+  // Fallback: If no valid chapter headers found, try splitting by top-level Markdown headers `## `
+  if (validMatches.length < 2) {
     const mdHeaderRegex = /(?:^|\n)#{1,2}\s+([^\n]+)/g;
-    matches.length = 0;
+    const mdMatches: RawMatch[] = [];
     while ((match = mdHeaderRegex.exec(text)) !== null) {
-      matches.push({
+      mdMatches.push({
         index: match.index,
         length: match[0].length,
+        hasMdHash: true,
+        keyword: "Chapter",
         numberStr: "",
         titleStr: (match[1] || "").trim(),
+        fullMatch: match[0].trim(),
       });
+    }
+
+    // Filter TOC from mdMatches as well
+    for (let i = 0; i < mdMatches.length; i++) {
+      const cur = mdMatches[i];
+      const nxt = mdMatches[i + 1];
+      if (nxt && nxt.index - cur.index < 250) continue;
+      validMatches.push(cur);
     }
   }
 
-  // If still fewer than 2 chapters found, treat entire text as a single chapter
-  if (matches.length === 0) {
+  // If still no chapters found, treat entire text as a single chapter
+  if (validMatches.length === 0) {
     return {
       title: defaultTitle || "Без названия",
       chapters: [
@@ -81,29 +121,43 @@ export function parseBookText(rawText: string, defaultTitle?: string): ParsedBoo
 
   const chapters: ParsedChapter[] = [];
 
-  for (let i = 0; i < matches.length; i++) {
-    const current = matches[i];
-    const next = matches[i + 1];
+  for (let i = 0; i < validMatches.length; i++) {
+    const current = validMatches[i];
+    const next = validMatches[i + 1];
 
-    const contentStart = current.index + current.length;
+    // Content includes the chapter heading at the top for rich reader display
+    const contentStart = current.index;
     const contentEnd = next ? next.index : text.length;
     const chapterRawContent = text.slice(contentStart, contentEnd);
     const content = normalizeContent(chapterRawContent);
 
-    // If there is no content in this chapter (e.g. title-only prefix), skip unless it's the only one
-    if (!content && matches.length > 1) {
+    // Skip empty chunks
+    if (content.length < 50 && validMatches.length > 1) {
       continue;
     }
 
-    const chapterNumber = i + 1;
-    let title: string | null = current.titleStr || null;
-    if (title && title.startsWith("#")) {
-      title = title.replace(/^#+\s*/, "").trim();
+    // Determine clean chapter title
+    let title: string = "";
+    if (current.titleStr) {
+      title = current.titleStr.replace(/^#+\s*/, "").trim();
+    }
+
+    // If title was on the next line (common in markdown with ## Chapter Title right below ### CHAPTER 1)
+    if (!title) {
+      const nextLineMatch = chapterRawContent.match(/^###?[^\n]+\n+##?\s+([^\n]+)/);
+      if (nextLineMatch) {
+        title = nextLineMatch[1].trim();
+      }
+    }
+
+    if (!title) {
+      const num = current.numberStr ? ` ${current.numberStr}` : "";
+      title = `${current.keyword}${num}`;
     }
 
     chapters.push({
-      number: chapterNumber,
-      title: title || `Глава ${chapterNumber}`,
+      number: chapters.length + 1,
+      title,
       content,
     });
   }
@@ -121,7 +175,6 @@ export function parseBookJson(jsonString: string): ParsedBook {
   const parsed = JSON.parse(jsonString);
 
   if (Array.isArray(parsed)) {
-    // Array of chapters: [{ number, title, content }]
     return {
       chapters: parsed.map((item, idx) => ({
         number: Number(item.number ?? idx + 1),

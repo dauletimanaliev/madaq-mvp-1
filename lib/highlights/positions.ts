@@ -38,7 +38,7 @@ function getParagraphForNode(node: Node) {
       ? (node as Element)
       : node.parentElement;
 
-  return element?.closest<HTMLElement>("p[data-start]") ?? null;
+  return element?.closest<HTMLElement>("[data-start]") ?? null;
 }
 
 function getOffsetWithinParagraph(
@@ -105,7 +105,7 @@ export function getCanonicalTextNodePositions(
   root: HTMLElement
 ): CanonicalTextNodePosition[] {
   const nodes: CanonicalTextNodePosition[] = [];
-  const paragraphs = root.querySelectorAll<HTMLElement>("p[data-start]");
+  const paragraphs = root.querySelectorAll<HTMLElement>("[data-start]");
 
   for (const paragraph of paragraphs) {
     const paragraphStart = Number(paragraph.dataset.start);

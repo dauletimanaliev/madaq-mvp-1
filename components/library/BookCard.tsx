@@ -14,6 +14,7 @@ export function BookCard({ book }: { book: Book }) {
           alt={`Обложка книги «${book.title}»`}
           width={96}
           height={144}
+          unoptimized
           className="h-36 w-24 rounded-sm object-cover"
         />
       ) : (

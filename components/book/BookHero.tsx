@@ -17,6 +17,7 @@ export function BookHero({
           alt={`Обложка книги «${book.title}»`}
           width={160}
           height={224}
+          unoptimized
           className="h-56 w-40 rounded-sm object-cover"
           priority
         />

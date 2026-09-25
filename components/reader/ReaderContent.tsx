@@ -20,7 +20,7 @@ const COLUMN_GAP = 32;
 type Paragraph = {
   start: number;
   text: string;
-  tag: "p" | "h2" | "h3";
+  tag: "p" | "h2" | "h3" | "blockquote" | "hr";
 };
 
 function clampPosition(position: number, contentLength: number) {
@@ -31,15 +31,21 @@ function getParagraphs(content: string): Paragraph[] {
   let start = 0;
 
   return content.split("\n\n").map((rawText) => {
-    const paragraph = { start, text: rawText, tag: "p" as const };
+    const trimmed = rawText.trim();
+    const paragraph: Paragraph = { start, text: rawText, tag: "p" };
     start += rawText.length + 2;
 
-    // Detect heading markers: ## Heading or ### Heading
+    if (trimmed === "---" || trimmed === "***") {
+      return { ...paragraph, text: "", tag: "hr" };
+    }
     if (rawText.startsWith("### ")) {
-      return { ...paragraph, text: rawText.slice(4), tag: "h3" as const };
+      return { ...paragraph, text: rawText.slice(4), tag: "h3" };
     }
     if (rawText.startsWith("## ")) {
-      return { ...paragraph, text: rawText.slice(3), tag: "h2" as const };
+      return { ...paragraph, text: rawText.slice(3), tag: "h2" };
+    }
+    if (rawText.startsWith("> ")) {
+      return { ...paragraph, text: rawText.slice(2), tag: "blockquote" };
     }
 
     return paragraph;
@@ -498,34 +504,75 @@ export function ReaderContent({
           }}
         >
           {paragraphs.map((paragraph) => {
+            if (paragraph.tag === "hr") {
+              return (
+                <div
+                  key={paragraph.start}
+                  data-start={paragraph.start}
+                  className="my-8 flex justify-center text-reader-text/30 select-none"
+                >
+                  <span className="tracking-[0.6em] text-xs">◆ ◆ ◆</span>
+                </div>
+              );
+            }
+
             const inner = renderFormattedText(paragraph.text);
+
+            if (paragraph.tag === "h3") {
+              return (
+                <div
+                  key={paragraph.start}
+                  data-start={paragraph.start}
+                  className="mb-2 mt-8 text-center text-xs font-semibold tracking-[0.25em] uppercase text-reader-muted select-text"
+                >
+                  {inner}
+                </div>
+              );
+            }
+
             if (paragraph.tag === "h2") {
               return (
                 <h2
                   key={paragraph.start}
                   data-start={paragraph.start}
-                  className="mb-6 mt-4 text-[1.3em] font-bold leading-snug select-text"
+                  className="mb-8 mt-2 text-center font-serif text-2xl md:text-3xl font-bold leading-tight text-reader-text select-text"
                 >
                   {inner}
                 </h2>
               );
             }
-            if (paragraph.tag === "h3") {
+
+            if (paragraph.tag === "blockquote") {
+              const isAttribution =
+                paragraph.text.trim().startsWith("—") ||
+                paragraph.text.trim().startsWith("-");
+              if (isAttribution) {
+                return (
+                  <div
+                    key={paragraph.start}
+                    data-start={paragraph.start}
+                    className="text-center text-xs font-medium tracking-wider uppercase text-reader-muted -mt-3 mb-8 select-text"
+                  >
+                    {inner}
+                  </div>
+                );
+              }
               return (
-                <h3
+                <blockquote
                   key={paragraph.start}
                   data-start={paragraph.start}
-                  className="mb-4 mt-3 text-[1.15em] font-semibold leading-snug select-text"
+                  className="my-5 mx-auto max-w-lg px-6 py-2 border-y border-reader-text/15 text-center italic text-reader-text/90 text-[0.95em] leading-relaxed select-text"
                 >
                   {inner}
-                </h3>
+                </blockquote>
               );
             }
+
             return (
               <p
                 key={paragraph.start}
                 data-start={paragraph.start}
-                className="mb-5 select-text"
+                className="mb-4 text-justify [text-indent:1.75em] leading-[1.85] select-text"
               >
                 {inner}
               </p>

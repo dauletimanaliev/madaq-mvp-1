@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  serverExternalPackages: ["@napi-rs/canvas", "canvas", "unpdf"],
 };
 
 export default nextConfig;

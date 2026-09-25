@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { extractTextItems, getMeta } from "unpdf";
+import { getMeta, renderPageAsImage } from "unpdf";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { prisma } from "@/lib/db/prisma";
 import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { parseBookText, normalizeContent } from "@/lib/books/parser";
 import type { ParsedBook } from "@/lib/books/parser";
-import { pdfItemsToFormattedText, type TextItem } from "@/lib/books/pdf-formatter";
+import { extractPdfWithFormatting } from "@/lib/books/pdf-formatter";
 
 export const maxDuration = 60; // allow up to 60s for large PDFs
 
@@ -72,21 +74,28 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     let rawText: string;
     let pdfTitle: string | undefined;
+    let pdfAuthor: string | undefined;
+    let pdfData: Uint8Array | null = null;
 
     const ext = file.name.split(".").pop()?.toLowerCase();
+    const isPdf = ext === "pdf" || file.type === "application/pdf";
 
-    if (ext === "pdf" || file.type === "application/pdf") {
-      // unpdf: serverless-friendly PDF text extraction with formatting
-      const pdfData = new Uint8Array(arrayBuffer);
+    if (isPdf) {
+      // Create a detached buffer to ensure structuredClone in PDF.js works in Node 22
+      const detachedBuffer = arrayBuffer.slice(0);
+      pdfData = new Uint8Array(detachedBuffer);
 
-      const { items } = await extractTextItems(pdfData);
-      rawText = pdfItemsToFormattedText(items as TextItem[][]);
+      // Extract text with true font resolution (bold, italic, headings, chapter labels)
+      rawText = await extractPdfWithFormatting(pdfData);
 
-      // Try to get title from PDF metadata
+      // Try to get title & author from PDF metadata
       try {
         const { info } = await getMeta(pdfData);
         if (info?.Title) {
           pdfTitle = String(info.Title);
+        }
+        if (info?.Author) {
+          pdfAuthor = String(info.Author);
         }
       } catch {
         // Metadata extraction is optional
@@ -159,7 +168,7 @@ export async function POST(request: NextRequest) {
 
     const title = titleOverride || parsedBook.title || defaultTitle;
     const authorName =
-      authorOverride || parsedBook.author || "Неизвестный автор";
+      authorOverride || parsedBook.author || pdfAuthor || "Неизвестный автор";
     const bookId = `book_${slugify(title)}_${Math.random().toString(36).substring(2, 7)}`;
 
     // Find or create author
@@ -173,12 +182,60 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Generate cover image from first page of PDF
+    let coverUrl: string | null = null;
+    if (isPdf && pdfData) {
+      try {
+        const coverBuffer = await renderPageAsImage(pdfData, 1, {
+          width: 500,
+          canvasImport: () => import("@napi-rs/canvas"),
+        });
+        if (coverBuffer) {
+          const coversDir = path.join(process.cwd(), "public", "covers");
+          await fs.mkdir(coversDir, { recursive: true });
+          const coverPath = path.join(coversDir, `${bookId}.png`);
+          await fs.writeFile(coverPath, Buffer.from(coverBuffer as ArrayBuffer));
+          coverUrl = `/covers/${bookId}.png`;
+
+          // If Supabase service role key is present, upload to Supabase Storage as well
+          const supabaseUrl =
+            process.env.SUPABASE_URL || "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
+          const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+          if (serviceRoleKey) {
+            try {
+              const res = await fetch(
+                `${supabaseUrl}/storage/v1/object/book-covers/${bookId}/cover.png`,
+                {
+                  method: "POST",
+                  headers: {
+                    authorization: `Bearer ${serviceRoleKey}`,
+                    apikey: serviceRoleKey,
+                    "content-type": "image/png",
+                    "x-upsert": "true",
+                  },
+                  body: Buffer.from(coverBuffer as ArrayBuffer),
+                }
+              );
+              if (res.ok) {
+                coverUrl = `${supabaseUrl}/storage/v1/object/public/book-covers/${bookId}/cover.png`;
+              }
+            } catch (storageErr) {
+              console.warn("Supabase cover upload fallback:", storageErr);
+            }
+          }
+        }
+      } catch (coverErr) {
+        console.error("Cover generation failed (non-critical):", coverErr);
+      }
+    }
+
     // Create book
     const book = await prisma.book.create({
       data: {
         id: bookId,
         title,
         description: parsedBook.description || null,
+        coverUrl,
         language: "ru",
         authorId: author.id,
       },
