@@ -11,7 +11,17 @@ const globalForPrisma = globalThis as unknown as {
 const prismaSchemaVersion = "highlight-types-v1";
 
 function createPrismaClient() {
+  // Connection Pool configuration (Standard v1.0 Section 4.1):
+  // Formula: connections = ((core_count * 2) + effective_spindle_count)
+  // Enforces connection_limit and pool_timeout on pooled connections
+  let databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl && !databaseUrl.includes("connection_limit")) {
+    const separator = databaseUrl.includes("?") ? "&" : "?";
+    databaseUrl = `${databaseUrl}${separator}connection_limit=10&pool_timeout=20`;
+  }
+
   return new PrismaClient({
+    datasourceUrl: databaseUrl,
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 }

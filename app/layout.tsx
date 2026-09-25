@@ -7,11 +7,13 @@ import "./globals.css";
 const lora = Lora({
   variable: "--font-lora",
   subsets: ["latin", "cyrillic"],
+  display: "swap",
 });
 
 const manrope = Manrope({
   variable: "--font-manrope",
   subsets: ["latin", "cyrillic"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
