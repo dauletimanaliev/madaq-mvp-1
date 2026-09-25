@@ -18,6 +18,24 @@ function slugify(text: string): string {
     .slice(0, 40);
 }
 
+function parseFilenameInfo(fileName: string): { title?: string; author?: string } {
+  let clean = fileName.replace(/\.[^.]+$/, "");
+  // Strip common downloader prefixes
+  clean = clean.replace(/^(_?oceanofpdf(\.com)?_?|\[.*?\]|\(.*?\))\s*/i, "").trim();
+  // Strip trailing page/edition suffixes like -340-1 or (z-lib)
+  clean = clean.replace(/[-_]\d+[-_]\d+$/, "").replace(/\s*\(.*?\)$/, "").trim();
+
+  // Split on " - " or " _-_ "
+  const parts = clean.split(/\s*[-—]\s*/);
+  if (parts.length >= 2) {
+    const p1 = parts[0].replace(/[_-]+/g, " ").trim();
+    const p2 = parts[1].replace(/[_-]+/g, " ").trim();
+    return { title: p1, author: p2 };
+  }
+
+  return { title: clean.replace(/[_-]+/g, " ").trim() };
+}
+
 export async function POST(request: NextRequest) {
   // Ensure the user is authenticated
   let userId: string;
@@ -125,10 +143,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse into chapters
+    const filenameInfo = parseFilenameInfo(file.name);
     const defaultTitle =
       titleOverride ||
       pdfTitle ||
+      filenameInfo.title ||
       file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
 
     let parsedBook: ParsedBook;
@@ -179,7 +198,11 @@ export async function POST(request: NextRequest) {
 
     const title = titleOverride || parsedBook.title || defaultTitle;
     const authorName =
-      authorOverride || parsedBook.author || pdfAuthor || "Неизвестный автор";
+      authorOverride ||
+      pdfAuthor ||
+      parsedBook.author ||
+      filenameInfo.author ||
+      "Неизвестный автор";
     const bookId = `book_${slugify(title)}_${Math.random().toString(36).substring(2, 7)}`;
 
     // Find or create author
