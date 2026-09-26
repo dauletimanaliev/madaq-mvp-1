@@ -12,7 +12,17 @@ const nextConfig: NextConfig = {
   },
   serverExternalPackages: ["@napi-rs/canvas", "canvas", "unpdf"],
   compress: true,
+  devIndicators: false,
+  experimental: {
+    proxyClientMaxBodySize: "50mb",
+    serverActions: {
+      bodySizeLimit: "50mb",
+    },
+  },
   async headers() {
+    if (process.env.NODE_ENV !== "production") {
+      return [];
+    }
     return [
       {
         // Global headers: HTTP/3 (QUIC) advertisement and security

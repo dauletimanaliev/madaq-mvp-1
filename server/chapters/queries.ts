@@ -15,8 +15,11 @@ export type ChapterMetric = {
 export async function getChapterMetrics(
   bookId: string
 ): Promise<ChapterMetric[]> {
+  const decoded = decodeURIComponent(bookId);
   const chapters = await prisma.chapter.findMany({
-    where: { bookId },
+    where: {
+      OR: [{ bookId }, { bookId: decoded }],
+    },
     select: { id: true, number: true, title: true, content: true },
     orderBy: { number: "asc" },
   });
@@ -30,8 +33,11 @@ export async function getChapterMetrics(
 }
 
 export async function getChaptersByBook(bookId: string): Promise<Chapter[]> {
+  const decoded = decodeURIComponent(bookId);
   return prisma.chapter.findMany({
-    where: { bookId },
+    where: {
+      OR: [{ bookId }, { bookId: decoded }],
+    },
     orderBy: { number: "asc" },
   });
 }
@@ -40,7 +46,13 @@ export async function getChapterByNumber(
   bookId: string,
   number: number
 ): Promise<Chapter | null> {
-  return prisma.chapter.findUnique({
-    where: { bookId_number: { bookId, number } },
+  const decoded = decodeURIComponent(bookId);
+  return prisma.chapter.findFirst({
+    where: {
+      OR: [
+        { bookId, number },
+        { bookId: decoded, number },
+      ],
+    },
   });
 }

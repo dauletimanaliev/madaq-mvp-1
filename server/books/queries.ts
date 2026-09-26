@@ -8,8 +8,11 @@ export async function getBooks(): Promise<Book[]> {
 }
 
 export async function getBookById(id: string): Promise<Book | null> {
-  return prisma.book.findUnique({
-    where: { id },
+  const decoded = decodeURIComponent(id);
+  return prisma.book.findFirst({
+    where: {
+      OR: [{ id }, { id: decoded }],
+    },
     include: { author: true },
   });
 }

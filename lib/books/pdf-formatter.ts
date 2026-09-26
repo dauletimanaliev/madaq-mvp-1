@@ -123,7 +123,7 @@ function findBodyLeftMargin(pages: TextItem[][]): number {
   return bodyX;
 }
 
-function groupIntoLines(items: TextItem[], pageWidth: number, bodyLeftMargin: number): Line[] {
+function groupIntoLines(items: TextItem[], pageWidth: number): Line[] {
   if (items.length === 0) return [];
 
   // Sort items primarily by Y descending (PDF coordinates usually go bottom-to-top or top-to-bottom)
@@ -147,7 +147,7 @@ function groupIntoLines(items: TextItem[], pageWidth: number, bodyLeftMargin: nu
     } else {
       // Sort items within the line by X ascending
       currentItems.sort((a, b) => a.x - b.x);
-      lines.push(buildLine(currentItems, pageWidth, bodyLeftMargin));
+      lines.push(buildLine(currentItems, pageWidth));
       currentItems = [item];
       currentY = item.y;
     }
@@ -155,13 +155,13 @@ function groupIntoLines(items: TextItem[], pageWidth: number, bodyLeftMargin: nu
 
   if (currentItems.length > 0) {
     currentItems.sort((a, b) => a.x - b.x);
-    lines.push(buildLine(currentItems, pageWidth, bodyLeftMargin));
+    lines.push(buildLine(currentItems, pageWidth));
   }
 
   return lines;
 }
 
-function buildLine(items: TextItem[], pageWidth: number, bodyLeftMargin: number): Line {
+function buildLine(items: TextItem[], pageWidth: number): Line {
   const text = items.map((it) => it.str).join("");
   const avgFontSize =
     items.reduce((sum, it) => sum + it.fontSize, 0) / items.length;
@@ -219,10 +219,9 @@ export function pdfItemsToFormattedText(pages: TextItem[][]): string {
   for (const pageItems of pages) {
     if (pageItems.length === 0) continue;
 
-    const lines = groupIntoLines(pageItems, pageWidth, bodyLeftMargin);
+    const lines = groupIntoLines(pageItems, pageWidth);
     if (lines.length === 0) continue;
 
-    let inParagraph = false;
     let paragraphBuffer = "";
 
     const flushParagraph = () => {
@@ -231,7 +230,6 @@ export function pdfItemsToFormattedText(pages: TextItem[][]): string {
         output.push("\n\n");
       }
       paragraphBuffer = "";
-      inParagraph = false;
     };
 
     for (let i = 0; i < lines.length; i++) {
@@ -372,7 +370,7 @@ export async function extractPdfWithFormatting(
     for (const fontId of Object.keys(textContent.styles)) {
       await new Promise<void>((resolve) => {
         if (page.commonObjs.has(fontId)) {
-          page.commonObjs.get(fontId, (f: any) => {
+          page.commonObjs.get(fontId, (f: { name?: string } | null) => {
             if (f?.name) fontNames[fontId] = f.name;
             resolve();
           });
@@ -383,7 +381,15 @@ export async function extractPdfWithFormatting(
     }
 
     const items: TextItem[] = [];
-    for (const it of textContent.items as any[]) {
+    for (const it of textContent.items as Array<{
+      str?: string;
+      fontName: string;
+      transform: number[];
+      width: number;
+      height: number;
+      dir: string;
+      hasEOL: boolean;
+    }>) {
       if (!it.str) continue;
       const realFont =
         fontNames[it.fontName] ||

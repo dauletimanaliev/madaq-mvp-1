@@ -15,7 +15,8 @@ export default async function ReadPage({
   params: Promise<{ bookId: string }>;
   searchParams: Promise<{ chapter?: string; at?: string }>;
 }) {
-  const { bookId } = await params;
+  const { bookId: rawBookId } = await params;
+  const bookId = decodeURIComponent(rawBookId);
   const { chapter: chapterParam, at } = await searchParams;
 
   const userId = await getCurrentUserId();

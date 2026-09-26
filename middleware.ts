@@ -11,7 +11,8 @@ export const config = {
     // - / (library home)
     // - /login
     // - /api/auth/* (Auth.js handlers)
+    // - /api/books/upload (direct multipart upload handler)
     // - _next/static, _next/image, favicon, public assets
-    "/((?!_next/static|_next/image|favicon\\.ico|api/auth|login$|$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|api/auth|api/books/upload|login$|$).*)",
   ],
 };

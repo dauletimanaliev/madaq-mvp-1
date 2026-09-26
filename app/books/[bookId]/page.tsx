@@ -10,7 +10,8 @@ export default async function BookPage({
 }: {
   params: Promise<{ bookId: string }>;
 }) {
-  const { bookId } = await params;
+  const { bookId: rawBookId } = await params;
+  const bookId = decodeURIComponent(rawBookId);
   const [book, chapters] = await Promise.all([
     getBookById(bookId),
     getChaptersByBook(bookId),

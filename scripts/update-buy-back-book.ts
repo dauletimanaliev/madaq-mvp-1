@@ -19,7 +19,7 @@ async function updateBook() {
   // 1. Generate & save cover image
   console.log('Generating cover image from page 1...');
   const coverBuffer = await renderPageAsImage(
-    new Uint8Array(arrayBuffer.slice(0)),
+    pdfData,
     1,
     {
       width: 500,

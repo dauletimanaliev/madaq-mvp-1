@@ -50,7 +50,7 @@ export function parseBookText(rawText: string, defaultTitle?: string): ParsedBoo
     fullMatch: string;
   };
 
-  let allMatches: RawMatch[] = [];
+  const allMatches: RawMatch[] = [];
   let match: RegExpExecArray | null;
 
   while ((match = chapterRegex.exec(text)) !== null) {
@@ -189,7 +189,13 @@ export function parseBookJson(jsonString: string): ParsedBook {
       title: parsed.title,
       author: parsed.author,
       description: parsed.description,
-      chapters: parsed.chapters.map((item: any, idx: number) => ({
+      chapters: (
+        parsed.chapters as Array<{
+          number?: unknown;
+          title?: unknown;
+          content?: unknown;
+        }>
+      ).map((item, idx: number) => ({
         number: Number(item.number ?? idx + 1),
         title: item.title ? String(item.title) : null,
         content: normalizeContent(String(item.content ?? "")),

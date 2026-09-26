@@ -5,8 +5,12 @@ export async function getProgress(
   userId: string,
   bookId: string
 ): Promise<ReadingProgress | null> {
-  return prisma.readingProgress.findUnique({
-    where: { userId_bookId: { userId, bookId } },
+  const decoded = decodeURIComponent(bookId);
+  return prisma.readingProgress.findFirst({
+    where: {
+      userId,
+      OR: [{ bookId }, { bookId: decoded }],
+    },
     select: {
       bookId: true,
       chapterId: true,
