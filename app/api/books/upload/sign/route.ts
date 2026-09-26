@@ -1,15 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUserId } from "@/lib/auth/get-current-user";
 
 export const maxDuration = 15;
 
 export async function POST(request: NextRequest) {
-  try {
-    await getCurrentUserId();
-  } catch {
-    return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
-  }
-
   const body = await request.json().catch(() => ({}));
   const fileName = body?.fileName;
 

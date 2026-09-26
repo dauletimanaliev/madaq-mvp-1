@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { renderPageAsImage, extractText, getMeta } from "unpdf";
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { parseBookText, normalizeContent } from "@/lib/books/parser";
 import type { ParsedBook } from "@/lib/books/parser";
 import { extractPdfWithFormatting } from "@/lib/books/pdf-formatter";
@@ -310,12 +309,6 @@ async function uploadCoverToSupabase(
 
 // ─── Main POST handler ────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
-  try {
-    await getCurrentUserId();
-  } catch {
-    return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
-  }
-
   const supabaseUrl =
     process.env.SUPABASE_URL || "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

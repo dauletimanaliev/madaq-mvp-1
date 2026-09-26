@@ -112,6 +112,8 @@ export function AddBookFabModal() {
 
         // Direct signed upload to Supabase Storage (bypasses Vercel 4.5MB payload limit completely)
         let signedSuccess = false;
+        let uploadErrorMsg: string | null = null;
+
         try {
           const signRes = await fetch("/api/books/upload/sign", {
             method: "POST",
@@ -141,14 +143,26 @@ export function AddBookFabModal() {
                   fileName: file.name,
                 });
                 uploadHeaders = { "Content-Type": "application/json" };
+              } else {
+                uploadErrorMsg = `Ошибка загрузки в хранилище (${directRes.status})`;
               }
             }
+          } else {
+            uploadErrorMsg = `Не удалось подготовить загрузку (${signRes.status})`;
           }
         } catch (signErr) {
-          console.warn("Signed upload fallback:", signErr);
+          console.warn("Signed upload error:", signErr);
         }
 
         if (!signedSuccess) {
+          if (file.size > 4.5 * 1024 * 1024) {
+            clearTimeout(timer1);
+            setState({
+              status: "error",
+              message: uploadErrorMsg || "Не удалось загрузить файл в хранилище. Попробуйте ещё раз.",
+            });
+            return;
+          }
           const formData = new FormData();
           formData.append("file", file);
           uploadPayload = formData;
