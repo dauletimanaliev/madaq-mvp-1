@@ -94,13 +94,58 @@ export function BookUpload() {
         );
       }, 3500);
 
-      const formData = new FormData();
-      formData.append("file", file);
-
       try {
+        let uploadPayload: BodyInit = new FormData();
+        let uploadHeaders: Record<string, string> = {};
+
+        // Direct signed upload to Supabase Storage (bypasses Vercel 4.5MB payload limit completely)
+        let signedSuccess = false;
+        try {
+          const signRes = await fetch("/api/books/upload/sign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileName: file.name, fileSize: file.size }),
+          });
+
+          if (signRes.ok) {
+            const signData = (await signRes.json()) as {
+              uploadUrl?: string;
+              storagePath?: string;
+            };
+
+            if (signData.uploadUrl && signData.storagePath) {
+              const uploadFormData = new FormData();
+              uploadFormData.append("", file, file.name);
+
+              const directRes = await fetch(signData.uploadUrl, {
+                method: "PUT",
+                body: uploadFormData,
+              });
+
+              if (directRes.ok) {
+                signedSuccess = true;
+                uploadPayload = JSON.stringify({
+                  storagePath: signData.storagePath,
+                  fileName: file.name,
+                });
+                uploadHeaders = { "Content-Type": "application/json" };
+              }
+            }
+          }
+        } catch (signErr) {
+          console.warn("Signed upload fallback:", signErr);
+        }
+
+        if (!signedSuccess) {
+          const formData = new FormData();
+          formData.append("file", file);
+          uploadPayload = formData;
+        }
+
         const response = await fetch("/api/books/upload", {
           method: "POST",
-          body: formData,
+          headers: uploadHeaders,
+          body: uploadPayload,
         });
 
         clearTimeout(timer1);

@@ -316,45 +316,79 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
 
-  const formData = await request.formData();
-  const file = formData.get("file") as File | null;
+  const supabaseUrl =
+    process.env.SUPABASE_URL || "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!file) {
-    return NextResponse.json({ error: "Файл не загружен" }, { status: 400 });
-  }
+  let fileBuffer: Buffer;
+  let fileName: string;
+  let tempStoragePathToDelete: string | null = null;
 
-  // Validate format
-  const allowedTypes = [
-    "application/pdf",
-    "text/plain",
-    "text/markdown",
-    "application/json",
-  ];
-  if (
-    !allowedTypes.includes(file.type) &&
-    !file.name.endsWith(".pdf") &&
-    !file.name.endsWith(".txt") &&
-    !file.name.endsWith(".md") &&
-    !file.name.endsWith(".json")
-  ) {
-    return NextResponse.json(
-      { error: "Поддерживаемые форматы: PDF, TXT, MD, JSON" },
-      { status: 400 }
-    );
-  }
-
-  if (file.size > 50 * 1024 * 1024) {
-    return NextResponse.json(
-      { error: "Файл слишком большой (макс. 50 МБ)" },
-      { status: 400 }
-    );
-  }
+  const contentType = request.headers.get("content-type") || "";
 
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const fileBuffer = Buffer.from(arrayBuffer);
-    const ext = file.name.split(".").pop()?.toLowerCase();
-    const isPdf = ext === "pdf" || file.type === "application/pdf";
+    if (contentType.includes("application/json")) {
+      const json = await request.json().catch(() => ({}));
+      const { storagePath, fileName: passedFileName } = json;
+
+      if (!storagePath || typeof storagePath !== "string") {
+        return NextResponse.json(
+          { error: "Не указан путь к файлу" },
+          { status: 400 }
+        );
+      }
+
+      if (!serviceRoleKey) {
+        return NextResponse.json(
+          { error: "Хранилище не сконфигурировано" },
+          { status: 500 }
+        );
+      }
+
+      // Download from Supabase Storage (internal fetch, completely bypassing Vercel 4.5MB request limit!)
+      const downloadRes = await fetch(
+        `${supabaseUrl}/storage/v1/object/book-covers/${storagePath}`,
+        {
+          headers: {
+            authorization: `Bearer ${serviceRoleKey}`,
+            apikey: serviceRoleKey,
+          },
+        }
+      );
+
+      if (!downloadRes.ok) {
+        return NextResponse.json(
+          { error: "Не удалось прочитать загруженный файл из хранилища" },
+          { status: 500 }
+        );
+      }
+
+      const arrayBuf = await downloadRes.arrayBuffer();
+      fileBuffer = Buffer.from(arrayBuf);
+      fileName = passedFileName || storagePath.split("/").pop() || "book.pdf";
+      tempStoragePathToDelete = storagePath;
+    } else {
+      const formData = await request.formData();
+      const file = formData.get("file") as File | null;
+
+      if (!file) {
+        return NextResponse.json({ error: "Файл не загружен" }, { status: 400 });
+      }
+
+      if (file.size > 50 * 1024 * 1024) {
+        return NextResponse.json(
+          { error: "Файл слишком большой (макс. 50 МБ)" },
+          { status: 400 }
+        );
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+      fileBuffer = Buffer.from(arrayBuffer);
+      fileName = file.name;
+    }
+
+    const ext = fileName.split(".").pop()?.toLowerCase();
+    const isPdf = ext === "pdf";
 
     let rawText: string;
     let title: string;
@@ -376,7 +410,7 @@ export async function POST(request: NextRequest) {
       // 2. 100% Automatic smart title & author detection
       const metaResult = await extractMetadataFromPdf(
         new Uint8Array(new Uint8Array(fileBuffer)),
-        file.name
+        fileName
       );
       title = metaResult.title;
       authorName = metaResult.author;
@@ -386,9 +420,23 @@ export async function POST(request: NextRequest) {
       rawText = await extractPdfWithFormatting(fullTextData);
     } else {
       rawText = fileBuffer.toString("utf-8");
-      const fnInfo = parseFilename(file.name);
-      title = fnInfo.title || file.name.replace(/\.[^.]+$/, "");
+      const fnInfo = parseFilename(fileName);
+      title = fnInfo.title || fileName.replace(/\.[^.]+$/, "");
       authorName = fnInfo.author || "Белгісіз автор";
+    }
+
+    // Clean up temporary uploaded file from Supabase in background
+    if (tempStoragePathToDelete && serviceRoleKey) {
+      fetch(
+        `${supabaseUrl}/storage/v1/object/book-covers/${tempStoragePathToDelete}`,
+        {
+          method: "DELETE",
+          headers: {
+            authorization: `Bearer ${serviceRoleKey}`,
+            apikey: serviceRoleKey,
+          },
+        }
+      ).catch(() => {});
     }
 
     if (!rawText || rawText.trim().length < 50) {
