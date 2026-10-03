@@ -1,6 +1,5 @@
 import { getBooks } from "@/server/books/queries";
 import { BookCard } from "@/components/library/BookCard";
-import { AddBookFabModal } from "@/components/library/AddBookFabModal";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +18,12 @@ export default async function LibraryPage() {
           <div className="mt-12 rounded-2xl border border-dashed border-border p-12 text-center">
             <p className="text-base font-medium text-ink">В библиотеке пока нет книг</p>
             <p className="mt-1 text-sm text-ink-muted">
-              Нажмите кнопку «+» в правом углу экрана, чтобы загрузить PDF.
+              <span className="hidden md:inline">
+                Нажмите кнопку «+» в правом углу экрана, чтобы загрузить PDF.
+              </span>
+              <span className="md:hidden">
+                Нажмите кнопку «+» в центре панели внизу, чтобы загрузить PDF.
+              </span>
             </p>
           </div>
         ) : (
@@ -30,9 +34,6 @@ export default async function LibraryPage() {
           </div>
         )}
       </div>
-
-      {/* Flutter-style Floating Action Button in the right corner */}
-      <AddBookFabModal />
     </div>
   );
 }

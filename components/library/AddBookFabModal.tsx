@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
+
+export function openAddBookModal() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("open-add-book-modal"));
+  }
+}
 
 type UploadState =
   | { status: "idle" }
@@ -34,10 +40,18 @@ const MAX_SIZE_MB = 50;
 
 export function AddBookFabModal() {
   const router = useRouter();
+  const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [state, setState] = useState<UploadState>({ status: "idle" });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Allow triggering modal from external buttons (e.g. mobile center nav button)
+  useEffect(() => {
+    const handleOpen = () => setIsOpen(true);
+    window.addEventListener("open-add-book-modal", handleOpen);
+    return () => window.removeEventListener("open-add-book-modal", handleOpen);
+  }, []);
 
   // Close on Escape key
   useEffect(() => {
@@ -279,82 +293,88 @@ export function AddBookFabModal() {
     setState({ status: "idle" });
   }, []);
 
+  const isReaderPage = pathname?.includes("/read");
+  if (isReaderPage) {
+    return null;
+  }
+  const isLibraryPage = pathname === "/";
+
   return (
     <>
-      {/* ─── Flutter-style Floating Action Button in the Right Corner ─── */}
-      <div
-        style={{
-          position: "fixed",
-          bottom: "36px",
-          right: "36px",
-          zIndex: 9999,
-          display: "flex",
-          flexDirection: "row-reverse",
-          alignItems: "center",
-          gap: "12px",
-        }}
-      >
-        <button
-          id="add-book-fab"
-          type="button"
-          onClick={openModal}
-          onMouseEnter={() => setIsHovered(true)}
-          onMouseLeave={() => setIsHovered(false)}
-          aria-label="Добавить книгу"
-          title="Добавить книгу"
-          style={{
-            width: "56px",
-            height: "56px",
-            borderRadius: "50%",
-            backgroundColor: "var(--accent, #7a2e3a)",
-            color: "#ffffff",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 10px 25px -3px rgba(122, 46, 58, 0.45), 0 4px 6px -4px rgba(0, 0, 0, 0.1)",
-            cursor: "pointer",
-            border: "none",
-            outline: "none",
-            transition: "transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease",
-            transform: isHovered ? "scale(1.08)" : "scale(1)",
-          }}
-        >
-          {/* Plus icon */}
-          <svg
-            style={{
-              width: "28px",
-              height: "28px",
-              transition: "transform 0.25s ease",
-              transform: isHovered ? "rotate(90deg)" : "rotate(0deg)",
-            }}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2.5}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-        </button>
-
-        {/* Flutter-style hover pill tooltip on the left of the button */}
+      {/* ─── Desktop-only Flutter-style Floating Action Button in the Right Corner ─── */}
+      {/* (Web version is completely untouched: stays in bottom-right corner at 36px, hidden on mobile) */}
+      {isLibraryPage && (
         <div
+          className="hidden md:flex flex-row-reverse items-center gap-3"
           style={{
-            pointerEvents: "none",
-            borderRadius: "9999px",
-            backgroundColor: "var(--ink, #211d16)",
-            color: "var(--paper, #efe6d3)",
-            padding: "6px 14px",
-            fontSize: "12px",
-            fontWeight: 600,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-            transition: "opacity 0.2s ease, transform 0.2s ease",
-            opacity: isHovered ? 1 : 0,
-            transform: isHovered ? "translateX(0)" : "translateX(8px)",
+            position: "fixed",
+            bottom: "36px",
+            right: "36px",
+            zIndex: 9999,
           }}
         >
-          Добавить книгу
+          <button
+            id="add-book-fab"
+            type="button"
+            onClick={openModal}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+            aria-label="Добавить книгу"
+            title="Добавить книгу"
+            style={{
+              width: "56px",
+              height: "56px",
+              borderRadius: "50%",
+              backgroundColor: "var(--accent, #7a2e3a)",
+              color: "#ffffff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 10px 25px -3px rgba(122, 46, 58, 0.45), 0 4px 6px -4px rgba(0, 0, 0, 0.1)",
+              cursor: "pointer",
+              border: "none",
+              outline: "none",
+              transition: "transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease",
+              transform: isHovered ? "scale(1.08)" : "scale(1)",
+            }}
+          >
+            {/* Plus icon */}
+            <svg
+              style={{
+                width: "28px",
+                height: "28px",
+                transition: "transform 0.25s ease",
+                transform: isHovered ? "rotate(90deg)" : "rotate(0deg)",
+              }}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2.5}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+          </button>
+
+          {/* Flutter-style hover pill tooltip on the left of the button */}
+          <div
+            style={{
+              pointerEvents: "none",
+              borderRadius: "9999px",
+              backgroundColor: "var(--ink, #211d16)",
+              color: "var(--paper, #efe6d3)",
+              padding: "6px 14px",
+              fontSize: "12px",
+              fontWeight: 600,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              transition: "opacity 0.2s ease, transform 0.2s ease",
+              opacity: isHovered ? 1 : 0,
+              transform: isHovered ? "translateX(0)" : "translateX(8px)",
+            }}
+          >
+            Добавить книгу
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ─── Dialog / Modal ─── */}
       {isOpen && (
