@@ -1,0 +1,17 @@
+{
+  "name": "Madaq — читай не отвлекаясь",
+  "short_name": "Madaq",
+  "description": "Платформа комфортного онлайн-чтения книг без отвлекающих факторов",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1c1b1a",
+  "theme_color": "#1c1b1a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

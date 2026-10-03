@@ -36,13 +36,37 @@ export function BookHero({
         )}
         <p className="text-sm text-ink-muted">
           {chapterCount} {chapterCount === 1 ? "глава" : "глав"}
+          {book.totalPages ? ` · ${book.totalPages} стр.` : ""}
         </p>
-        <Link
-          href={`/books/${book.id}/read`}
-          className="mt-2 inline-flex w-fit items-center rounded-sm bg-accent px-5 py-2.5 text-sm font-medium text-paper-soft transition-opacity hover:opacity-90"
-        >
-          Читать
-        </Link>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <Link
+            href={`/books/${book.id}/read`}
+            className="inline-flex w-fit items-center rounded-sm bg-accent px-5 py-2.5 text-sm font-medium text-paper-soft transition-opacity hover:opacity-90"
+          >
+            Читать
+          </Link>
+          {book.storageS3Key && (
+            <Link
+              href={`/books/${book.id}/pdf`}
+              className="inline-flex w-fit items-center gap-1.5 rounded-sm border border-border bg-paper-soft px-4 py-2.5 text-sm font-medium text-ink transition-colors hover:border-accent hover:text-accent"
+            >
+              <svg
+                className="h-4 w-4 text-accent"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                />
+              </svg>
+              PDF ридер
+            </Link>
+          )}
+        </div>
       </div>
     </div>
   );

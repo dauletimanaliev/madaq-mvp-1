@@ -8,7 +8,7 @@ const globalForPrisma = globalThis as unknown as {
   prismaSchemaVersion: string | undefined;
 };
 
-const prismaSchemaVersion = "highlight-types-v1";
+const prismaSchemaVersion = "ingestion-pipeline-v2";
 
 function createPrismaClient() {
   // Connection Pool configuration (Standard v1.0 Section 4.1):

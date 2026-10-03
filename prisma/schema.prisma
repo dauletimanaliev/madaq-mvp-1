@@ -1,8 +1,6 @@
-// Madaq — MVP1 schema
-// Только то, что реально нужно сейчас: авторы, книги, главы,
-// пользователи, прогресс чтения, закладки и выделения.
-// Никаких reviews/ratings/genres/favorites и т.д. — добавим,
-// когда продукт это реально потребует.
+// Madaq — schema
+// Авторы, книги, главы, пользователи, прогресс чтения,
+// закладки, выделения и очередь обработки загрузок.
 
 generator client {
   provider = "prisma-client-js"
@@ -20,6 +18,13 @@ enum HighlightType {
   fat
   vitamin
   fiber
+}
+
+enum UploadJobStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
 }
 
 // ──────────────────────────────
@@ -49,13 +54,23 @@ model Book {
   publishedYear Int?     @map("published_year")
   createdAt     DateTime @default(now()) @map("created_at")
 
+  // ── Ingestion Pipeline fields (ТЗ §1, §2, §5) ──
+  fileHashSha256 String?  @unique @map("file_hash_sha256") // SHA-256 дедупликация
+  fileSizeBytes  Int?     @map("file_size_bytes")           // размер исходного файла
+  totalPages     Int?     @map("total_pages")               // количество страниц PDF
+  isLinearized   Boolean  @default(false) @map("is_linearized") // Fast Web View
+  storageS3Key   String?  @map("storage_s3_key")            // путь к PDF в S3/Supabase Storage
+
   authorId String @map("author_id")
   author   Author @relation(fields: [authorId], references: [id])
 
   chapters        Chapter[]
+  pages           BookPage[]
   readingProgress ReadingProgress[]
   bookmarks       Bookmark[]
   highlights      Highlight[]
+  uploadJob       UploadJob?
+  userLibraries   UserLibrary[]
 
   @@index([authorId])
   @@map("books")
@@ -97,6 +112,7 @@ model User {
   readingProgress ReadingProgress[]
   bookmarks       Bookmark[]
   highlights      Highlight[]
+  userLibrary     UserLibrary[]
 
   @@map("users")
 }
@@ -111,6 +127,8 @@ model ReadingProgress {
   id              String   @id @default(cuid())
   position        Int      @default(0) // позиция в тексте главы (символы)
   progressPercent Float    @default(0) @map("progress_percent")
+  lastReadPage    Int?     @default(1) @map("last_read_page")
+  lastReadAt      DateTime @default(now()) @map("last_read_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   userId    String  @map("user_id")
@@ -172,4 +190,65 @@ model Highlight {
   @@index([userId, chapterId])
   @@index([bookId])
   @@map("highlights")
+}
+
+// ──────────────────────────────
+// UploadJob (ТЗ §1, §5)
+// Асинхронная очередь обработки загрузок.
+// Статусы: PENDING → PROCESSING → SUCCESS / FAILED
+// ──────────────────────────────
+model UploadJob {
+  id        String          @id @default(cuid())
+  status    UploadJobStatus @default(PENDING)
+  fileName  String          @map("file_name")
+  fileSize  Int             @map("file_size")          // размер в байтах
+  step      Int             @default(0)                // текущий шаг конвейера (0–5)
+  stepText  String?         @map("step_text")          // "Загружаем файл…", "Извлекаем текст…" и т.д.
+  errorLog  String?         @map("error_log")          // лог ошибки при FAILED
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  bookId String? @unique @map("book_id") // появляется после успешной обработки
+  book   Book?   @relation(fields: [bookId], references: [id])
+
+  @@index([status])
+  @@map("upload_jobs")
+}
+
+// ──────────────────────────────
+// BookPage (ТЗ §1, §4)
+// Постраничный индекс текста для быстрого поиска внутри книги
+// ──────────────────────────────
+model BookPage {
+  id         String   @id @default(cuid())
+  pageNumber Int      @map("page_number")
+  content    String   // текст страницы
+  bookId     String   @map("book_id")
+  book       Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([bookId, pageNumber])
+  @@index([bookId])
+  @@map("book_pages")
+}
+
+// ──────────────────────────────
+// UserLibrary (ТЗ §1, §5)
+// Книги в личной библиотеке пользователя с трекингом прогресса чтения
+// ──────────────────────────────
+model UserLibrary {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookId       String   @map("book_id")
+  book         Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  lastReadPage Int      @default(1) @map("last_read_page")
+  progressPct  Float    @default(0) @map("progress_pct")
+  lastReadAt   DateTime @default(now()) @map("last_read_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, bookId])
+  @@index([userId])
+  @@index([bookId])
+  @@map("user_library")
 }

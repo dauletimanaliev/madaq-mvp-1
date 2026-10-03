@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { renderPageAsImage, extractText, getMeta } from "unpdf";
 import { prisma } from "@/lib/db/prisma";
 import { parseBookText, normalizeContent } from "@/lib/books/parser";
 import type { ParsedBook } from "@/lib/books/parser";
 import { extractPdfWithFormatting } from "@/lib/books/pdf-formatter";
+import { linearizePdf } from "@/lib/books/linearizer";
 
 export const maxDuration = 60; // allow up to 60s for large PDFs
 
@@ -67,9 +69,10 @@ function parseFilename(fileName: string): { title?: string; author?: string } {
 async function extractMetadataFromPdf(
   uint8Array: Uint8Array,
   fileName: string
-): Promise<{ title: string; author: string }> {
+): Promise<{ title: string; author: string; totalPages: number }> {
   let detectedTitle: string | undefined;
   let detectedAuthor: string | undefined;
+  let totalPages = 0;
 
   // 1. Try reading PDF metadata
   try {
@@ -91,6 +94,9 @@ async function extractMetadataFromPdf(
     const textCopy = new Uint8Array(new Uint8Array(uint8Array));
     const textRes = await extractText(textCopy, { mergePages: false });
     pagesText = textRes.text.slice(0, 15);
+    if (!totalPages && typeof textRes.totalPages === "number") {
+      totalPages = textRes.totalPages;
+    }
   } catch (err) {
     console.warn("Could not extract pages for metadata analysis:", err);
   }
@@ -240,6 +246,7 @@ async function extractMetadataFromPdf(
   return {
     title: detectedTitle.trim(),
     author: detectedAuthor.trim(),
+    totalPages,
   };
 }
 
@@ -267,7 +274,7 @@ function safeStorageKey(text: string): string {
 
 // ─── Upload cover to Supabase Storage ──────────────────────────────────────
 async function uploadCoverToSupabase(
-  storageKey: string,
+  coverKey: string,
   coverBuffer: ArrayBuffer
 ): Promise<string | null> {
   const supabaseUrl =
@@ -280,8 +287,9 @@ async function uploadCoverToSupabase(
   }
 
   try {
+    const filePath = coverKey.endsWith(".png") ? coverKey : `${coverKey}.png`;
     const res = await fetch(
-      `${supabaseUrl}/storage/v1/object/book-covers/${storageKey}/cover.png`,
+      `${supabaseUrl}/storage/v1/object/book-covers/${filePath}`,
       {
         method: "POST",
         headers: {
@@ -295,7 +303,7 @@ async function uploadCoverToSupabase(
     );
 
     if (res.ok) {
-      return `${supabaseUrl}/storage/v1/object/public/book-covers/${storageKey}/cover.png`;
+      return `${supabaseUrl}/storage/v1/object/public/book-covers/${filePath}`;
     }
 
     const errText = await res.text();
@@ -303,6 +311,49 @@ async function uploadCoverToSupabase(
     return null;
   } catch (err) {
     console.error("Supabase cover upload error:", err);
+    return null;
+  }
+}
+
+// ─── Upload original PDF to Supabase Storage (ТЗ §1, §2) ───────────────────
+async function uploadPdfToSupabase(
+  fileHashSha256: string,
+  pdfBuffer: Buffer
+): Promise<string | null> {
+  const supabaseUrl =
+    process.env.SUPABASE_URL || "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!serviceRoleKey) {
+    console.warn("SUPABASE_SERVICE_ROLE_KEY not set, PDF upload skipped");
+    return null;
+  }
+
+  try {
+    const s3Path = `books/${fileHashSha256}.pdf`;
+    const res = await fetch(
+      `${supabaseUrl}/storage/v1/object/book-pdfs/${s3Path}`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${serviceRoleKey}`,
+          apikey: serviceRoleKey,
+          "content-type": "application/pdf",
+          "x-upsert": "true",
+        },
+        body: new Uint8Array(pdfBuffer),
+      }
+    );
+
+    if (res.ok) {
+      return `book-pdfs/${s3Path}`;
+    }
+
+    const errText = await res.text();
+    console.error(`Supabase PDF upload failed (${res.status}):`, errText);
+    return null;
+  } catch (err) {
+    console.error("Supabase PDF upload error:", err);
     return null;
   }
 }
@@ -383,13 +434,104 @@ export async function POST(request: NextRequest) {
     const ext = fileName.split(".").pop()?.toLowerCase();
     const isPdf = ext === "pdf";
 
+    // 1. Валидация магических байт для PDF (ТЗ §1)
+    if (isPdf) {
+      const magicBytes = fileBuffer.subarray(0, 4).toString("ascii");
+      if (!magicBytes.startsWith("%PDF")) {
+        return NextResponse.json(
+          { error: "Файл поврежден или не является корректным PDF (отсутствует сигнатура %PDF)" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 2. Расчет SHA-256 хеша для дедупликации (ТЗ §1)
+    const fileHashSha256 = crypto
+      .createHash("sha256")
+      .update(fileBuffer)
+      .digest("hex");
+
+    // 3. Дедупликация: проверяем, загружался ли уже такой файл (ТЗ §1)
+    const existingBook = await prisma.book.findUnique({
+      where: { fileHashSha256 },
+      include: {
+        author: true,
+        chapters: { select: { id: true, content: true } },
+      },
+    });
+
+    if (existingBook) {
+      console.log(
+        `⚡ [Дедупликация] Книга уже существует (SHA-256: ${fileHashSha256}) -> bookId: ${existingBook.id}`
+      );
+
+      // Удаляем временный файл из хранилища, если он был загружен
+      if (tempStoragePathToDelete && serviceRoleKey) {
+        fetch(
+          `${supabaseUrl}/storage/v1/object/book-covers/${tempStoragePathToDelete}`,
+          {
+            method: "DELETE",
+            headers: {
+              authorization: `Bearer ${serviceRoleKey}`,
+              apikey: serviceRoleKey,
+            },
+          }
+        ).catch(() => {});
+      }
+
+      const totalChars = existingBook.chapters.reduce(
+        (sum, ch) => sum + ch.content.length,
+        0
+      );
+
+      return NextResponse.json({
+        bookId: existingBook.id,
+        title: existingBook.title,
+        author: existingBook.author.name,
+        chaptersCount: existingBook.chapters.length,
+        totalChars,
+        coverUrl: existingBook.coverUrl,
+        isDuplicate: true,
+      });
+    }
+
+    // 4. Регистрация задания в upload_jobs (ТЗ §1, §5)
+    let uploadJob: { id: string } | null = null;
+    try {
+      uploadJob = await prisma.uploadJob.create({
+        data: {
+          fileName,
+          fileSize: fileBuffer.length,
+          status: "PROCESSING",
+          step: 1,
+          stepText: "Файл валидирован, извлечение метаданных и обложки...",
+        },
+      });
+    } catch (jobErr) {
+      console.warn("UploadJob creation error:", jobErr);
+    }
+
     let rawText: string;
     let title: string;
     let authorName: string;
     let coverBuffer: ArrayBuffer | null = null;
+    let totalPages = 0;
+    let isLinearized = false;
+    let finalPdfBuffer = fileBuffer;
+    let pageTexts: string[] = [];
 
     if (isPdf) {
-      // 1. Render Cover from Page 1
+      // 1. Render Cover from Page 1 (Thumbnail)
+      if (uploadJob) {
+        await prisma.uploadJob.update({
+          where: { id: uploadJob.id },
+          data: {
+            step: 2,
+            stepText: "Генерация обложки (Thumbnail) из первой страницы...",
+          },
+        }).catch(() => {});
+      }
+
       try {
         const coverData = new Uint8Array(new Uint8Array(fileBuffer));
         coverBuffer = await renderPageAsImage(coverData, 1, {
@@ -400,15 +542,52 @@ export async function POST(request: NextRequest) {
         console.error("Cover rendering error (page 1):", coverErr);
       }
 
-      // 2. 100% Automatic smart title & author detection
+      // 2. 100% Automatic smart title, author & pages detection
+      if (uploadJob) {
+        await prisma.uploadJob.update({
+          where: { id: uploadJob.id },
+          data: {
+            step: 3,
+            stepText: "Извлечение метаданных и форматированного текста...",
+          },
+        }).catch(() => {});
+      }
+
       const metaResult = await extractMetadataFromPdf(
         new Uint8Array(new Uint8Array(fileBuffer)),
         fileName
       );
       title = metaResult.title;
       authorName = metaResult.author;
+      totalPages = metaResult.totalPages;
 
-      // 3. Extract full formatted text for reader
+      // 3. Extract page-by-page text for in-book search index
+      try {
+        const textCopy = new Uint8Array(new Uint8Array(fileBuffer));
+        const pagesRes = await extractText(textCopy, { mergePages: false });
+        if (pagesRes.text && Array.isArray(pagesRes.text)) {
+          pageTexts = pagesRes.text;
+        }
+      } catch (pagesErr) {
+        console.warn("Could not extract page texts:", pagesErr);
+      }
+
+      // 4. Linearize PDF using qpdf --linearize (Fast Web View, ТЗ §1, §2)
+      if (uploadJob) {
+        await prisma.uploadJob.update({
+          where: { id: uploadJob.id },
+          data: {
+            step: 4,
+            stepText: "Линеаризация PDF (Fast Web View через qpdf)...",
+          },
+        }).catch(() => {});
+      }
+
+      const linResult = await linearizePdf(fileBuffer);
+      finalPdfBuffer = linResult.buffer;
+      isLinearized = linResult.isLinearized;
+
+      // 5. Extract full formatted text for reader
       const fullTextData = new Uint8Array(new Uint8Array(fileBuffer));
       rawText = await extractPdfWithFormatting(fullTextData);
     } else {
@@ -433,6 +612,16 @@ export async function POST(request: NextRequest) {
     }
 
     if (!rawText || rawText.trim().length < 50) {
+      if (uploadJob) {
+        await prisma.uploadJob.update({
+          where: { id: uploadJob.id },
+          data: {
+            status: "FAILED",
+            errorLog: "Не удалось извлечь текст (отсканированный PDF)",
+          },
+        }).catch(() => {});
+      }
+
       return NextResponse.json(
         {
           error:
@@ -442,7 +631,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`📖 Auto-detected: title="${title}", author="${authorName}"`);
+    console.log(`📖 Auto-detected: title="${title}", author="${authorName}", pages=${totalPages}`);
 
     // Parse book into chapters
     let parsedBook: ParsedBook;
@@ -480,6 +669,16 @@ export async function POST(request: NextRequest) {
     }
 
     if (!parsedBook.chapters || parsedBook.chapters.length === 0) {
+      if (uploadJob) {
+        await prisma.uploadJob.update({
+          where: { id: uploadJob.id },
+          data: {
+            status: "FAILED",
+            errorLog: "Не удалось разбить текст на главы",
+          },
+        }).catch(() => {});
+      }
+
       return NextResponse.json(
         { error: "Не удалось разбить текст на главы." },
         { status: 422 }
@@ -500,14 +699,30 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Upload cover to Supabase Storage
-    let coverUrl: string | null = null;
-    if (coverBuffer) {
-      const storageKey = safeStorageKey(title) || safeStorageKey(bookId);
-      coverUrl = await uploadCoverToSupabase(storageKey, coverBuffer);
+    // Step 5: Upload original/linearized PDF & cover to storage
+    if (uploadJob) {
+      await prisma.uploadJob.update({
+        where: { id: uploadJob.id },
+        data: {
+          step: 5,
+          stepText: "Сохранение исходного PDF и обложки в хранилище...",
+        },
+      }).catch(() => {});
     }
 
-    // Create book record
+    // Upload cover to Supabase Storage (ТЗ §1: book-covers/${fileHashSha256}.png)
+    let coverUrl: string | null = null;
+    if (coverBuffer) {
+      coverUrl = await uploadCoverToSupabase(fileHashSha256, coverBuffer);
+    }
+
+    // Upload linearized PDF to Supabase Storage (ТЗ §1, §2: book-pdfs/books/${fileHashSha256}.pdf)
+    let storageS3Key: string | null = null;
+    if (isPdf) {
+      storageS3Key = await uploadPdfToSupabase(fileHashSha256, finalPdfBuffer);
+    }
+
+    // Create book record with Ingestion Pipeline fields
     const book = await prisma.book.create({
       data: {
         id: bookId,
@@ -516,6 +731,11 @@ export async function POST(request: NextRequest) {
         coverUrl,
         language: "ru",
         authorId: author.id,
+        fileHashSha256,
+        fileSizeBytes: finalPdfBuffer.length,
+        totalPages: totalPages > 0 ? totalPages : parsedBook.chapters.length,
+        isLinearized,
+        storageS3Key,
       },
     });
 
@@ -529,22 +749,50 @@ export async function POST(request: NextRequest) {
       })),
     });
 
+    // Create page-by-page text index for fast in-book search (ТЗ §4)
+    if (pageTexts.length > 0) {
+      await prisma.bookPage.createMany({
+        data: pageTexts.map((pgContent, idx) => ({
+          bookId: book.id,
+          pageNumber: idx + 1,
+          content: pgContent.trim() || `[Страница ${idx + 1}]`,
+        })),
+      });
+      console.log(`📑 [Индекс страниц] Сохранено ${pageTexts.length} страниц для книги «${title}»`);
+    }
+
     const totalChars = parsedBook.chapters.reduce(
       (sum: number, ch: { content: string }) => sum + ch.content.length,
       0
     );
 
+    // Complete upload job
+    if (uploadJob) {
+      await prisma.uploadJob.update({
+        where: { id: uploadJob.id },
+        data: {
+          status: "SUCCESS",
+          step: 5,
+          stepText: "Книга успешно сохранена",
+          bookId: book.id,
+        },
+      }).catch(() => {});
+    }
+
     console.log(
-      `✅ Book "${title}" by "${authorName}" created: ${parsedBook.chapters.length} chapters, cover: ${coverUrl ? "✅" : "❌"}`
+      `✅ Book "${title}" by "${authorName}" created: ${parsedBook.chapters.length} chapters, pages: ${totalPages || parsedBook.chapters.length}, cover: ${coverUrl ? "✅" : "❌"}, PDF S3: ${storageS3Key ? "✅" : "❌"}`
     );
 
     return NextResponse.json({
+      jobId: uploadJob?.id,
       bookId: book.id,
       title: book.title,
       author: author.name,
       chaptersCount: parsedBook.chapters.length,
       totalChars,
       coverUrl,
+      fileHashSha256,
+      totalPages: book.totalPages,
     });
   } catch (error) {
     console.error("Book upload error:", error);

@@ -1,5 +1,5 @@
 import { getBooks } from "@/server/books/queries";
-import { BookCard } from "@/components/library/BookCard";
+import { BookListWithSearch } from "@/components/library/BookListWithSearch";
 
 export const dynamic = "force-dynamic";
 
@@ -14,25 +14,7 @@ export default async function LibraryPage() {
           Что читаем сегодня
         </h1>
 
-        {books.length === 0 ? (
-          <div className="mt-12 rounded-2xl border border-dashed border-border p-12 text-center">
-            <p className="text-base font-medium text-ink">В библиотеке пока нет книг</p>
-            <p className="mt-1 text-sm text-ink-muted">
-              <span className="hidden md:inline">
-                Нажмите кнопку «+» в правом углу экрана, чтобы загрузить PDF.
-              </span>
-              <span className="md:hidden">
-                Нажмите кнопку «+» в центре панели внизу, чтобы загрузить PDF.
-              </span>
-            </p>
-          </div>
-        ) : (
-          <div className="mt-10 flex flex-col gap-4">
-            {books.map((book) => (
-              <BookCard key={book.id} book={book} />
-            ))}
-          </div>
-        )}
+        <BookListWithSearch initialBooks={books} />
       </div>
     </div>
   );

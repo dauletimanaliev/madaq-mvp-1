@@ -12,6 +12,11 @@ export type Book = {
   coverUrl: string | null;
   language: string;
   publishedYear: number | null;
+  fileHashSha256?: string | null;
+  fileSizeBytes?: number | null;
+  totalPages?: number | null;
+  isLinearized?: boolean;
+  storageS3Key?: string | null;
   author: Author;
 };
 
