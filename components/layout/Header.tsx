@@ -111,167 +111,101 @@ export function Header() {
       {/* Mobile Bottom Navigation Bar */}
       <nav
         aria-label="Мобильная навигация"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-30 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-paper/95 backdrop-blur-md border-t border-border pb-[max(0.5rem,env(safe-area-inset-bottom))]"
       >
-        {/* Continuous background with true curved scoop/notch */}
-        <div className="absolute inset-0 pointer-events-none -z-10 overflow-hidden">
-          {/* Left wing */}
-          <div
-            className="absolute top-0 bottom-0 left-0 bg-paper/95 backdrop-blur-md border-t border-border"
-            style={{ right: "calc(50% + 42px)" }}
-          />
-
-          {/* Right wing */}
-          <div
-            className="absolute top-0 bottom-0 right-0 bg-paper/95 backdrop-blur-md border-t border-border"
-            style={{ left: "calc(50% + 42px)" }}
-          />
-
-          {/* Center notch cradle (fixed 84px wide, dips down 28px) */}
-          <div
-            className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-[84px]"
+        <div className="mx-auto grid grid-cols-5 items-center max-w-md px-2 py-1.5">
+          {/* 1. Библиотека */}
+          <Link
+            href="/"
+            className={`flex flex-col items-center gap-1 py-1 px-1 rounded-lg text-xs transition-colors ${
+              pathname === "/"
+                ? "text-ink font-semibold bg-paper-soft"
+                : "text-ink-muted hover:text-ink"
+            }`}
           >
-            {/* Top 32px holds the smooth curve */}
-            <div className="absolute top-0 left-0 right-0 h-[32px]">
-              <svg
-                className="w-full h-full"
-                viewBox="0 0 84 32"
-                fill="none"
-              >
-                {/* Solid paper mask below the curve */}
-                <path
-                  d="M0 0 C18 0 22 28 42 28 C62 28 66 0 84 0 L84 32 L0 32 Z"
-                  fill="var(--paper)"
-                />
-                {/* Continuous border stroke across the curve */}
-                <path
-                  d="M0 0.5 C18 0.5 22 28.5 42 28.5 C62 28.5 66 0.5 84 0.5"
-                  stroke="var(--border)"
-                  strokeWidth="1"
-                  fill="none"
-                />
+            <div className={pathname === "/" ? "text-accent" : "text-ink-muted"}>
+              {navItems[0].icon}
+            </div>
+            <span className="text-[11px] leading-tight">{navItems[0].label}</span>
+          </Link>
+
+          {/* 2. Закладки */}
+          <Link
+            href="/bookmarks"
+            className={`flex flex-col items-center gap-1 py-1 px-1 rounded-lg text-xs transition-colors ${
+              pathname?.startsWith("/bookmarks")
+                ? "text-ink font-semibold bg-paper-soft"
+                : "text-ink-muted hover:text-ink"
+            }`}
+          >
+            <div className={pathname?.startsWith("/bookmarks") ? "text-accent" : "text-ink-muted"}>
+              {navItems[1].icon}
+            </div>
+            <span className="text-[11px] leading-tight">{navItems[1].label}</span>
+          </Link>
+
+          {/* 3. Добавить (обычная кнопка как Библиотека и Закладки) */}
+          <button
+            id="mobile-add-book-fab"
+            type="button"
+            onClick={openAddBookModal}
+            className="flex flex-col items-center gap-1 py-1 px-1 rounded-lg text-xs transition-colors text-ink-muted hover:text-ink active:scale-95 focus:outline-none"
+            title="Добавить книгу"
+            aria-label="Добавить книгу"
+          >
+            <div className="text-ink-muted hover:text-ink">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
             </div>
-            {/* Bottom fill below the curve down to the edge of the screen */}
-            <div className="absolute top-[32px] bottom-0 left-0 right-0 bg-paper/95 backdrop-blur-md" />
-          </div>
-        </div>
+            <span className="text-[11px] leading-tight">Добавить</span>
+          </button>
 
-        <div className="relative mx-auto flex max-w-md items-center justify-between px-3 pt-2 pb-1">
-          {/* Left tabs: Библиотека & Закладки */}
-          <div className="flex flex-1 items-center justify-around pr-1">
-            {navItems.slice(0, 2).map((item) => {
-              const isActive =
-                item.href === "/"
-                  ? pathname === "/"
-                  : pathname?.startsWith(item.href);
+          {/* 4. Заметки */}
+          <Link
+            href="/notes"
+            className={`flex flex-col items-center gap-1 py-1 px-1 rounded-lg text-xs transition-colors ${
+              pathname?.startsWith("/notes")
+                ? "text-ink font-semibold bg-paper-soft"
+                : "text-ink-muted hover:text-ink"
+            }`}
+          >
+            <div className={pathname?.startsWith("/notes") ? "text-accent" : "text-ink-muted"}>
+              {navItems[2].icon}
+            </div>
+            <span className="text-[11px] leading-tight">{navItems[2].label}</span>
+          </Link>
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-lg text-xs transition-colors ${
-                    isActive
-                      ? "text-ink font-semibold bg-paper-soft"
-                      : "text-ink-muted hover:text-ink"
-                  }`}
-                >
-                  <div className={isActive ? "text-accent" : "text-ink-muted"}>
-                    {item.icon}
-                  </div>
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </div>
-
-          {/* Central Elevated Action Button (+ button docking in notch) */}
-          <div className="relative flex flex-col items-center justify-center w-14 shrink-0 -mt-6">
-            {/* Ambient backlight glow */}
-            <div
-              className="absolute -top-1 w-14 h-14 rounded-full pointer-events-none opacity-70 blur-md"
-              style={{
-                background:
-                  "radial-gradient(circle, rgba(122, 46, 58, 0.5) 0%, rgba(122, 46, 58, 0) 70%)",
-              }}
-            />
-
-            {/* Cradle depth shadow */}
-            <div className="absolute top-2 w-12 h-6 rounded-full bg-ink/5 blur-sm pointer-events-none" />
-
-            {/* Elevated Button */}
-            <button
-              id="mobile-add-book-fab"
-              type="button"
-              onClick={openAddBookModal}
-              aria-label="Добавить книгу"
-              title="Добавить книгу"
-              className="relative flex items-center justify-center rounded-full text-white transition-all duration-200 active:scale-90 focus:outline-none"
-              style={{
-                width: "52px",
-                height: "52px",
-                background:
-                  "linear-gradient(135deg, #8f3442 0%, #7a2e3a 52%, #5e1f29 100%)",
-                boxShadow:
-                  "0 8px 22px -2px rgba(122, 46, 58, 0.55), 0 3px 8px rgba(0, 0, 0, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.35)",
-                border: "3.5px solid var(--paper)",
-              }}
-            >
-              <svg
-                className="w-6 h-6 transition-transform duration-200 active:rotate-90"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
+          {/* 5. Профиль / Войти */}
+          {(() => {
+            const isProfileActive = pathname?.startsWith("/profile");
+            const showAvatar = session?.user?.image;
+            return (
+              <Link
+                href={session?.user ? "/profile" : "/login"}
+                className={`flex flex-col items-center gap-1 py-1 px-1 rounded-lg text-xs transition-colors ${
+                  isProfileActive
+                    ? "text-ink font-semibold bg-paper-soft"
+                    : "text-ink-muted hover:text-ink"
+                }`}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 4.5v15m7.5-7.5h-15"
-                />
-              </svg>
-            </button>
-          </div>
-
-          {/* Right tabs: Заметки & Профиль */}
-          <div className="flex flex-1 items-center justify-around pl-1">
-            {navItems.slice(2, 4).map((item) => {
-              const isActive = pathname?.startsWith(item.href);
-              const isProfileTab = item.href === "/profile";
-              const showAvatar = isProfileTab && session?.user?.image;
-
-              return (
-                <Link
-                  key={item.href}
-                  href={
-                    session?.user
-                      ? item.href
-                      : isProfileTab
-                      ? "/login"
-                      : item.href
-                  }
-                  className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-lg text-xs transition-colors ${
-                    isActive
-                      ? "text-ink font-semibold bg-paper-soft"
-                      : "text-ink-muted hover:text-ink"
-                  }`}
-                >
-                  <div className={isActive ? "text-accent" : "text-ink-muted"}>
-                    {showAvatar ? (
-                      <img
-                        src={session?.user?.image ?? ""}
-                        alt=""
-                        className="h-5 w-5 rounded-full border border-border"
-                      />
-                    ) : (
-                      item.icon
-                    )}
-                  </div>
-                  <span>{isProfileTab && !session?.user ? "Войти" : item.label}</span>
-                </Link>
-              );
-            })}
-          </div>
+                <div className={isProfileActive ? "text-accent" : "text-ink-muted"}>
+                  {showAvatar ? (
+                    <img
+                      src={session?.user?.image ?? ""}
+                      alt=""
+                      className="h-5 w-5 rounded-full border border-border"
+                    />
+                  ) : (
+                    navItems[3].icon
+                  )}
+                </div>
+                <span className="text-[11px] leading-tight">
+                  {session?.user ? navItems[3].label : "Войти"}
+                </span>
+              </Link>
+            );
+          })()}
         </div>
       </nav>
     </>
