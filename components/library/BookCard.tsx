@@ -26,9 +26,21 @@ export function BookCard({ book }: { book: Book }) {
         {book.description && (
           <p className="max-w-md text-sm text-ink-muted">{book.description}</p>
         )}
-        <span className="mt-2 text-sm font-medium text-accent group-hover:underline">
-          Открыть
-        </span>
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-sm font-medium text-accent group-hover:underline">
+            Открыть
+          </span>
+          {book.contentFormat === "EPUB" && (
+            <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-semibold text-accent">
+              EPUB
+            </span>
+          )}
+          {book.contentFormat === "PDF" && (
+            <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+              PDF
+            </span>
+          )}
+        </div>
       </div>
     </Link>
   );

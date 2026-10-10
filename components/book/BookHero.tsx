@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { Book } from "@/lib/types";
+import { getBookReaderUrl } from "@/lib/books/reader-url";
 
 export function BookHero({
   book,
@@ -40,12 +41,12 @@ export function BookHero({
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <Link
-            href={`/books/${book.id}/read`}
+            href={getBookReaderUrl(book)}
             className="inline-flex w-fit items-center rounded-sm bg-accent px-5 py-2.5 text-sm font-medium text-paper-soft transition-opacity hover:opacity-90"
           >
             Читать
           </Link>
-          {book.storageS3Key && (
+          {book.storageS3Key && book.contentFormat !== "PDF" && (
             <Link
               href={`/books/${book.id}/pdf`}
               className="inline-flex w-fit items-center gap-1.5 rounded-sm border border-border bg-paper-soft px-4 py-2.5 text-sm font-medium text-ink transition-colors hover:border-accent hover:text-accent"
@@ -53,8 +54,8 @@ export function BookHero({
               <svg
                 className="h-4 w-4 text-accent"
                 fill="none"
-                stroke="currentColor"
                 viewBox="0 0 24 24"
+                stroke="currentColor"
               >
                 <path
                   strokeLinecap="round"
@@ -64,6 +65,14 @@ export function BookHero({
                 />
               </svg>
               PDF ридер
+            </Link>
+          )}
+          {book.epubStorageKey && book.contentFormat !== "EPUB" && (
+            <Link
+              href={`/books/${book.id}/epub`}
+              className="inline-flex w-fit items-center gap-1.5 rounded-sm border border-border bg-paper-soft px-4 py-2.5 text-sm font-medium text-ink transition-colors hover:border-accent hover:text-accent"
+            >
+              EPUB ридер
             </Link>
           )}
         </div>

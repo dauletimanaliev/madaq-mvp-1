@@ -461,7 +461,7 @@ export function ReaderContent({
 
   return (
     <section className="flex-1 flex flex-col min-h-0 py-1 md:py-3 select-text overflow-hidden">
-      <div className="mb-2 flex items-center justify-between text-xs md:text-sm text-reader-muted shrink-0">
+      <div className="mb-2 flex items-center justify-between text-xs md:text-sm text-ink-muted shrink-0">
         <span>
           Страница {pageIndex + 1} из {pageCount}
         </span>
@@ -469,14 +469,14 @@ export function ReaderContent({
           <button
             type="button"
             onClick={() => setFontSize((size) => Math.max(14, size - 1))}
-            className="flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-lg border border-reader-text/20 text-xs font-semibold hover:border-reader-text/40 active:scale-95 transition-colors"
+            className="flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-lg border border-border text-ink text-xs font-semibold hover:border-ink/40 hover:bg-border/40 active:scale-95 transition-colors"
           >
             A−
           </button>
           <button
             type="button"
             onClick={() => setFontSize((size) => Math.min(24, size + 1))}
-            className="flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-lg border border-reader-text/20 text-xs font-semibold hover:border-reader-text/40 active:scale-95 transition-colors"
+            className="flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-lg border border-border text-ink text-xs font-semibold hover:border-ink/40 hover:bg-border/40 active:scale-95 transition-colors"
           >
             A+
           </button>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { renderPageAsImage, extractText, getMeta } from "unpdf";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/db/prisma";
 import { parseBookText, normalizeContent } from "@/lib/books/parser";
 import type { ParsedBook } from "@/lib/books/parser";
@@ -356,7 +357,7 @@ async function uploadEpubToSupabase(
     );
 
     if (res.ok) {
-      return s3Path;
+      return `book-epubs/${s3Path}`;
     }
 
     const errText = await res.text();
@@ -411,8 +412,40 @@ async function uploadPdfToSupabase(
   }
 }
 
+// ─── Link book to UserLibrary ──────────────────────────────────────────────
+async function linkBookToUserLibrary(
+  userId: string | undefined,
+  bookId: string
+): Promise<void> {
+  if (!userId) return;
+  try {
+    await prisma.userLibrary.upsert({
+      where: {
+        userId_bookId: {
+          userId,
+          bookId,
+        },
+      },
+      create: {
+        userId,
+        bookId,
+      },
+      update: {},
+    });
+  } catch (err) {
+    console.warn("Failed to link book to user library:", err);
+  }
+}
+
 // ─── Main POST handler ────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
+  let session = null;
+  try {
+    session = await auth();
+  } catch {
+    session = null;
+  }
+  const userId = session?.user?.id;
   const supabaseUrl =
     process.env.SUPABASE_URL || "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -539,6 +572,9 @@ export async function POST(request: NextRequest) {
           }
         ).catch(() => {});
       }
+
+      // Привязываем существующую книгу к библиотеке текущего пользователя
+      await linkBookToUserLibrary(userId, existingBook.id);
 
       const totalChars = existingBook.chapters.reduce(
         (sum, ch) => sum + ch.content.length,
@@ -677,6 +713,9 @@ export async function POST(request: NextRequest) {
           epubStorageKey,
         },
       });
+
+      // Привязываем EPUB книгу к библиотеке пользователя
+      await linkBookToUserLibrary(userId, book.id);
 
       if (uploadJob) {
         await prisma.uploadJob.update({
@@ -937,6 +976,9 @@ export async function POST(request: NextRequest) {
         contentFormat: isPdf ? "PDF" : "TEXT",
       },
     });
+
+    // Привязываем PDF/Text книгу к библиотеке пользователя
+    await linkBookToUserLibrary(userId, book.id);
 
     // Create chapters
     await prisma.chapter.createMany({

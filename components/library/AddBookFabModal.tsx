@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
+import { getBookReaderUrl } from "@/lib/books/reader-url";
 
 export function openAddBookModal() {
   if (typeof window !== "undefined") {
@@ -26,16 +27,18 @@ type UploadState =
       author: string;
       chaptersCount: number;
       coverUrl?: string | null;
+      contentFormat?: string | null;
     }
   | { status: "error"; message: string };
 
 const ACCEPTED_TYPES = [
   "application/pdf",
+  "application/epub+zip",
   "text/plain",
   "text/markdown",
   "application/json",
 ];
-const ACCEPTED_EXTENSIONS = [".pdf", ".txt", ".md", ".json"];
+const ACCEPTED_EXTENSIONS = [".pdf", ".epub", ".txt", ".md", ".json"];
 const MAX_SIZE_MB = 50;
 
 export function AddBookFabModal() {
@@ -77,7 +80,7 @@ export function AddBookFabModal() {
   }, [isOpen]);
 
   const isValidFile = useCallback((file: File) => {
-    if (ACCEPTED_TYPES.includes(file.type)) return true;
+    if (file.type && ACCEPTED_TYPES.includes(file.type)) return true;
     return ACCEPTED_EXTENSIONS.some((ext) =>
       file.name.toLowerCase().endsWith(ext)
     );
@@ -88,7 +91,7 @@ export function AddBookFabModal() {
       if (!isValidFile(file)) {
         setState({
           status: "error",
-          message: "Поддерживаемые форматы: PDF, TXT, MD, JSON",
+          message: "Поддерживаемые форматы: PDF, EPUB, TXT, MD, JSON",
         });
         return;
       }
@@ -198,6 +201,7 @@ export function AddBookFabModal() {
           author?: string;
           chaptersCount?: number;
           coverUrl?: string | null;
+          contentFormat?: string | null;
         } = {};
         try {
           data = JSON.parse(resText);
@@ -224,6 +228,13 @@ export function AddBookFabModal() {
           author: data.author || "Неизвестный автор",
           chaptersCount: data.chaptersCount || 0,
           coverUrl: data.coverUrl,
+          contentFormat:
+            data.contentFormat ||
+            (file.name.toLowerCase().endsWith(".epub")
+              ? "EPUB"
+              : file.name.toLowerCase().endsWith(".pdf")
+              ? "PDF"
+              : "TEXT"),
         });
 
         // Automatically refresh library in background so the book is there immediately
@@ -293,7 +304,10 @@ export function AddBookFabModal() {
     setState({ status: "idle" });
   }, []);
 
-  const isReaderPage = pathname?.includes("/read");
+  const isReaderPage =
+    pathname?.includes("/read") ||
+    pathname?.includes("/epub") ||
+    pathname?.includes("/pdf");
   if (isReaderPage) {
     return null;
   }
@@ -405,7 +419,7 @@ export function AddBookFabModal() {
                   Добавить книгу
                 </h2>
                 <p className="mt-1 text-sm text-ink-muted">
-                  Выберите PDF файл книги на вашем устройстве
+                  Выберите файл книги на вашем устройстве
                 </p>
               </div>
 
@@ -479,7 +493,12 @@ export function AddBookFabModal() {
                           type="button"
                           onClick={() => {
                             closeModal();
-                            router.push(`/books/${state.bookId}/read`);
+                            router.push(
+                              getBookReaderUrl({
+                                id: state.bookId,
+                                contentFormat: state.contentFormat,
+                              })
+                            );
                           }}
                           className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:opacity-95 active:scale-95 transition-all"
                         >
@@ -540,7 +559,7 @@ export function AddBookFabModal() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".pdf,.txt,.md,.json,application/pdf,text/plain,text/markdown,application/json"
+                      accept=".pdf,.epub,.txt,.md,.json,application/pdf,application/epub+zip,text/plain,text/markdown,application/json"
                       onChange={handleFileSelect}
                       className="hidden"
                     />
@@ -572,14 +591,14 @@ export function AddBookFabModal() {
                     </div>
 
                     <p className="text-base font-semibold text-ink">
-                      Нажмите, чтобы выбрать PDF файл
+                      Нажмите, чтобы выбрать файл
                     </p>
                     <p className="mt-1 text-xs text-ink-muted">
                       или перетащите файл в это окно
                     </p>
 
                     <p className="mt-4 text-[11px] text-ink-muted/70">
-                      Поддерживается PDF до {MAX_SIZE_MB} МБ
+                      Поддерживаемые форматы: PDF, EPUB, TXT, MD, JSON (до {MAX_SIZE_MB} МБ)
                     </p>
 
                     {state.status === "error" && (

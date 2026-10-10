@@ -44,10 +44,13 @@ export async function searchBooks(query: string): Promise<Book[]> {
         author_name: string;
         author_bio: string | null;
         author_photo: string | null;
+        content_format: "TEXT" | "PDF" | "EPUB";
+        epub_storage_key: string | null;
       }>
     >`
       SELECT b.id, b.title, b.description, b.cover_url, b.language, b.published_year,
              b.file_hash_sha256, b.file_size_bytes, b.total_pages, b.is_linearized, b.storage_s3_key,
+             b.content_format, b.epub_storage_key,
              a.id as author_id, a.name as author_name, a.bio as author_bio, a.photo_url as author_photo
       FROM books b
       JOIN authors a ON b.author_id = a.id
@@ -71,6 +74,8 @@ export async function searchBooks(query: string): Promise<Book[]> {
       totalPages: r.total_pages,
       isLinearized: r.is_linearized,
       storageS3Key: r.storage_s3_key,
+      contentFormat: r.content_format,
+      epubStorageKey: r.epub_storage_key,
       author: {
         id: r.author_id,
         name: r.author_name,

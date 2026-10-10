@@ -28,12 +28,12 @@ export function ReaderControls({
   position: number;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 border-t border-reader-text/10 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] text-xs md:text-sm text-reader-muted bg-reader-bg shrink-0">
+    <div className="flex items-center justify-between gap-2 border-t border-border pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] text-xs md:text-sm text-ink-muted bg-paper shrink-0">
       <button
         type="button"
         onClick={onPrevious}
         disabled={!canGoPrevious}
-        className="hidden md:flex min-h-10 items-center gap-1 rounded-lg px-2.5 hover:text-reader-text active:scale-95 disabled:cursor-not-allowed disabled:opacity-0 transition-all font-medium"
+        className="hidden md:flex min-h-10 items-center gap-1 rounded-lg px-2.5 hover:text-ink hover:bg-border/60 active:scale-95 disabled:cursor-not-allowed disabled:opacity-0 transition-all font-medium"
       >
         ← Назад
       </button>
@@ -46,9 +46,9 @@ export function ReaderControls({
           chapterNumber={chapterNumber}
           position={position}
         />
-        <span className="font-mono text-xs text-reader-muted">{Math.round(progressPercent)}%</span>
+        <span className="font-mono text-xs text-ink-muted">{Math.round(progressPercent)}%</span>
         {isLastPageOfChapter && (
-          <span className="md:hidden text-[11px] text-amber-300/90 font-medium ml-1">
+          <span className="md:hidden text-[11px] text-accent font-medium ml-1">
             Свайп влево для след. главы →
           </span>
         )}
@@ -60,8 +60,8 @@ export function ReaderControls({
         disabled={!canGoNext}
         className={`hidden md:flex min-h-10 items-center gap-1 rounded-lg px-2.5 transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-0 font-medium ${
           isLastPageOfChapter
-            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold shadow-sm hover:bg-amber-500/30"
-            : "hover:text-reader-text"
+            ? "bg-accent/15 text-accent border border-accent/40 font-bold shadow-xs hover:bg-accent/25"
+            : "hover:text-ink hover:bg-border/60"
         }`}
       >
         {isLastPageOfChapter ? "След. глава →" : "Дальше →"}

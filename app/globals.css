@@ -10,10 +10,10 @@
   --accent-soft: #efd9dc;
   --border: #ddd0b3;
 
-  /* Reader — тёмная сторона, для сосредоточенного чтения */
-  --reader-bg: #1c2420;
-  --reader-text: #ece4d2;
-  --reader-muted: #8c9a90;
+  /* Reader — тёплая бумага (единый стиль для всех форматов: EPUB, PDF, Text) */
+  --reader-bg: var(--paper);
+  --reader-text: var(--ink);
+  --reader-muted: var(--ink-muted);
 }
 
 @theme inline {

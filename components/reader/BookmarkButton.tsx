@@ -54,8 +54,8 @@ export function BookmarkButton({
         title={saved ? "Закладка сохранена" : "Добавить закладку"}
         className={`flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all active:scale-95 ${
           saved
-            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-            : "border-reader-text/20 text-reader-muted hover:border-reader-text/40 hover:text-reader-text"
+            ? "border-emerald-700/40 bg-emerald-700/10 text-emerald-800"
+            : "border-border text-ink-muted hover:border-ink/40 hover:text-ink hover:bg-border/40"
         }`}
       >
         <svg className="w-3.5 h-3.5" fill={saved ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

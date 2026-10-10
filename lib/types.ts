@@ -17,6 +17,8 @@ export type Book = {
   totalPages?: number | null;
   isLinearized?: boolean;
   storageS3Key?: string | null;
+  contentFormat?: "TEXT" | "PDF" | "EPUB";
+  epubStorageKey?: string | null;
   author: Author;
 };
 

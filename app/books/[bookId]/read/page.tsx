@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getBookById } from "@/server/books/queries";
 import { getChapterMetrics, getChapterByNumber } from "@/server/chapters/queries";
 import { getProgress } from "@/server/progress/queries";
@@ -13,11 +13,11 @@ export default async function ReadPage({
   searchParams,
 }: {
   params: Promise<{ bookId: string }>;
-  searchParams: Promise<{ chapter?: string; at?: string }>;
+  searchParams: Promise<{ chapter?: string; at?: string; mode?: string }>;
 }) {
   const { bookId: rawBookId } = await params;
   const bookId = decodeURIComponent(rawBookId);
-  const { chapter: chapterParam, at } = await searchParams;
+  const { chapter: chapterParam, at, mode } = (await searchParams) || {};
 
   const userId = await getCurrentUserId();
 
@@ -27,7 +27,24 @@ export default async function ReadPage({
     getProgress(userId, bookId),
   ]);
 
-  if (!book || chapterMetrics.length === 0) notFound();
+  if (!book) notFound();
+
+  // If original EPUB exists, always read in EPUB reader
+  if (book.contentFormat === "EPUB" || Boolean(book.epubStorageKey)) {
+    redirect(`/books/${book.id}/epub`);
+  }
+
+  // If original PDF exists, default to original PDF reader (like Apple Preview)
+  if ((book.contentFormat === "PDF" || Boolean(book.storageS3Key)) && mode !== "text") {
+    redirect(`/books/${book.id}/pdf`);
+  }
+
+  if (chapterMetrics.length === 0) {
+    if (book.contentFormat === "PDF" || Boolean(book.storageS3Key)) {
+      redirect(`/books/${book.id}/pdf`);
+    }
+    notFound();
+  }
 
   const savedChapter = chapterMetrics.find(
     (candidate) => candidate.id === savedProgress?.chapterId

@@ -234,30 +234,32 @@ export function Reader({
   }, [goToNext, goToPrevious]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-reader-bg text-reader-text overflow-hidden">
+    <div className="fixed inset-0 z-50 flex flex-col bg-paper text-ink overflow-hidden select-none">
       {/* Top Loading Progress Line when fetching non-cached chapter */}
       {isLoadingChapter && (
-        <div className="fixed top-0 inset-x-0 h-1 bg-amber-400 z-50 animate-pulse shadow-md" />
+        <div className="fixed top-0 inset-x-0 h-1 bg-accent z-50 animate-pulse shadow-xs" />
       )}
 
-      <div className="mx-auto flex h-full max-w-2xl w-full flex-col px-3 md:px-6 pt-3 md:pt-6 pb-2 overflow-hidden">
-        <ReaderHeader
-          bookId={book.id}
-          bookTitle={book.title}
-          chapterTitle={chapter.title ?? `Глава ${chapter.number}`}
-        />
+      <ReaderHeader
+        bookId={book.id}
+        bookTitle={book.title}
+        chapterTitle={chapter.title ?? `Глава ${chapter.number}`}
+      />
 
-        <ReaderContent
-          key={contentKey}
-          content={chapter.content}
-          initialPosition={contentInitialPos}
-          highlights={highlights}
-          onPositionChange={setPosition}
-          onPaginationChange={setPageState}
-          onSelectionChange={setSelectedRange}
-          onNextChapter={handleNextChapter}
-          onPreviousChapter={handlePreviousChapter}
-        />
+      <div className="mx-auto flex flex-1 min-h-0 max-w-2xl w-full flex-col px-2 sm:px-4 py-1.5 overflow-hidden select-text">
+        <div className="flex-1 min-h-0 flex flex-col bg-white/80 sm:bg-white rounded-xs shadow-md sm:shadow-lg border border-border/80 my-1 px-5 sm:px-10 py-4 sm:py-6 overflow-hidden">
+          <ReaderContent
+            key={contentKey}
+            content={chapter.content}
+            initialPosition={contentInitialPos}
+            highlights={highlights}
+            onPositionChange={setPosition}
+            onPaginationChange={setPageState}
+            onSelectionChange={setSelectedRange}
+            onNextChapter={handleNextChapter}
+            onPreviousChapter={handlePreviousChapter}
+          />
+        </div>
 
         <HighlightMenu
           bookId={book.id}

@@ -47,7 +47,10 @@ const navItems = [
 export function Header() {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const isReaderPage = pathname?.includes("/read");
+  const isReaderPage =
+    pathname?.includes("/read") ||
+    pathname?.includes("/epub") ||
+    pathname?.includes("/pdf");
 
   if (isReaderPage) {
     return null;

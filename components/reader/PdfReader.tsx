@@ -364,126 +364,21 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
 
   return (
     <div
-      className="flex h-screen w-screen flex-col overflow-hidden bg-[#1c1b1a] text-[#f4efe6]"
+      className="flex h-screen w-screen flex-col overflow-hidden bg-paper text-ink select-none"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
       {/* Toast Notification (e.g. "Продолжаем с 14 страницы") */}
       {toastMessage && (
-        <div className="absolute top-16 left-1/2 z-50 -translate-x-1/2 rounded-full border border-[#44403a] bg-[#242220]/95 px-4 py-2 text-xs font-medium text-[#f4efe6] shadow-xl backdrop-blur-md transition-all animate-in fade-in slide-in-from-top-2">
+        <div className="absolute top-16 left-1/2 z-50 -translate-x-1/2 rounded-full border border-border bg-paper-soft/95 px-4 py-2 text-xs font-medium text-ink shadow-xl backdrop-blur-md transition-all animate-in fade-in slide-in-from-top-2">
           📖 {toastMessage}
         </div>
       )}
 
-      {/* Top Header Controls */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#33302c] bg-[#242220] px-3 sm:px-4 shadow-sm select-none z-20">
-        {/* Left: Back & Title */}
-        <div className="flex items-center gap-3 truncate">
-          <Link
-            href={`/books/${book.id}`}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[#c4b9a7] transition-colors hover:bg-[#34312d] hover:text-white"
-            title="Назад к книге"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M10 19l-7-7m0 0l7-7m-7 7h18"
-              />
-            </svg>
-            <span className="hidden sm:inline">К книге</span>
-          </Link>
-
-          <div className="h-4 w-[1px] bg-[#3e3b36]" />
-
-          <div className="flex flex-col truncate">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate font-serif text-sm font-medium text-[#f4efe6]">
-                {book.title}
-              </h1>
-              {book.isLinearized && (
-                <span
-                  className="hidden md:inline-flex items-center rounded-full bg-emerald-950/60 px-2 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-800/40"
-                  title="Fast Web View: документ оптимизирован для мгновенной потоковой подгрузки через HTTP 206 Range"
-                >
-                  ⚡ Fast Web View
-                </span>
-              )}
-            </div>
-            <p className="truncate text-[11px] text-[#a19888]">
-              {book.author.name}
-            </p>
-          </div>
-        </div>
-
-        {/* Center: Page Navigation Controls */}
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-            disabled={currentPage <= 1 || isLoading}
-            className="rounded p-1.5 text-[#c4b9a7] transition hover:bg-[#34312d] hover:text-white disabled:opacity-30"
-            title="Предыдущая страница (← / свайп вправо)"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-          </button>
-
-          <form
-            onSubmit={handlePageInputSubmit}
-            className="flex items-center gap-1 text-xs text-[#c4b9a7]"
-          >
-            <input
-              type="text"
-              value={pageInput}
-              onChange={handlePageInputChange}
-              onBlur={handlePageInputSubmit}
-              className="h-7 w-12 rounded border border-[#44403a] bg-[#1a1918] text-center font-mono text-xs text-white focus:border-[#d97736] focus:outline-none"
-            />
-            <span className="text-[#888072]">из {numPages || "…"}</span>
-          </form>
-
-          <button
-            onClick={() => setCurrentPage((p) => Math.min(p + 1, numPages))}
-            disabled={currentPage >= numPages || isLoading}
-            className="rounded p-1.5 text-[#c4b9a7] transition hover:bg-[#34312d] hover:text-white disabled:opacity-30"
-            title="Следующая страница (→ / свайп влево)"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 5l7 7-7 7"
-              />
-            </svg>
-          </button>
-        </div>
-
-        {/* Right: Search, Zoom & Mode Switch */}
+      {/* Top Header Controls — unified with EPUB reader */}
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-paper-soft px-3 sm:px-5 shadow-xs select-none z-20">
+        {/* Left: Search Toggle Button */}
         <div className="flex items-center gap-2">
-          {/* In-book Search Toggle Button */}
           <button
             onClick={() => {
               setSearchOpen((prev) => {
@@ -492,15 +387,15 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
                 return next;
               });
             }}
-            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+            className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs sm:text-sm font-medium transition-all active:scale-95 ${
               searchOpen
-                ? "bg-[#d97736] text-white"
-                : "bg-[#34312d] text-[#c4b9a7] hover:text-white hover:bg-[#433f3a]"
+                ? "bg-accent text-paper-soft shadow-xs"
+                : "text-ink hover:bg-border/60"
             }`}
             title="Поиск внутри книги (Cmd+F)"
           >
             <svg
-              className="h-3.5 w-3.5"
+              className="h-4 w-4"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -512,100 +407,142 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
               />
             </svg>
-            <span className="hidden md:inline">Поиск в книге</span>
+            <span className="hidden sm:inline">Поиск в книге</span>
           </button>
+        </div>
 
-          {/* Zoom controls */}
-          <div className="hidden items-center gap-1 sm:flex">
-            <button
-              onClick={() => setScale((s) => Math.max(s - 0.2, 0.6))}
-              className="rounded p-1.5 text-[#c4b9a7] transition hover:bg-[#34312d] hover:text-white"
-              title="Уменьшить (-)"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+        {/* Center: Title & Author */}
+        <div className="flex flex-col items-center justify-center max-w-[42%] sm:max-w-[50%] px-2 text-center truncate">
+          <div className="flex items-center gap-2 truncate justify-center max-w-full">
+            <h1 className="truncate font-serif text-sm sm:text-base font-medium text-ink">
+              {book.title}
+            </h1>
+            {book.isLinearized && (
+              <span
+                className="hidden lg:inline-flex items-center rounded-full bg-emerald-800/10 px-2 py-0.5 text-[10px] font-medium text-emerald-800 border border-emerald-700/30"
+                title="Fast Web View: потоковая загрузка HTTP 206 Range"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M20 12H4"
-                />
+                ⚡ Fast Web View
+              </span>
+            )}
+          </div>
+          <span className="w-full truncate text-[11px] text-ink-muted">
+            {book.author?.name || "Автор неизвестен"}
+          </span>
+        </div>
+
+        {/* Right: Page Navigation, Zoom & Return to book */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Page controls */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+              disabled={currentPage <= 1 || isLoading}
+              className="rounded-md p-1.5 text-ink-muted hover:text-ink hover:bg-border/60 active:scale-95 transition-all disabled:opacity-30"
+              title="Предыдущая страница (← / свайп вправо)"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
-            <span className="w-10 text-center font-mono text-xs text-[#a19888]">
+
+            <form
+              onSubmit={handlePageInputSubmit}
+              className="flex items-center gap-1 text-xs text-ink-muted"
+            >
+              <input
+                type="text"
+                value={pageInput}
+                onChange={handlePageInputChange}
+                onBlur={handlePageInputSubmit}
+                className="h-7 w-12 rounded border border-border bg-paper text-center font-mono text-xs text-ink focus:border-accent focus:outline-none"
+              />
+              <span className="text-[11px]">/ {numPages || "…"}</span>
+            </form>
+
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, numPages))}
+              disabled={currentPage >= numPages || isLoading}
+              className="rounded-md p-1.5 text-ink-muted hover:text-ink hover:bg-border/60 active:scale-95 transition-all disabled:opacity-30"
+              title="Следующая страница (→ / свайп влево)"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Zoom controls */}
+          <div className="hidden items-center gap-1 sm:flex ml-1">
+            <button
+              onClick={() => setScale((s) => Math.max(s - 0.2, 0.6))}
+              className="rounded-md p-1.5 text-ink-muted hover:text-ink hover:bg-border/60 active:scale-95 transition-all"
+              title="Уменьшить (-)"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+              </svg>
+            </button>
+            <span className="w-9 text-center font-mono text-xs text-ink-muted">
               {Math.round(scale * 100)}%
             </span>
             <button
               onClick={() => setScale((s) => Math.min(s + 0.2, 3.0))}
-              className="rounded p-1.5 text-[#c4b9a7] transition hover:bg-[#34312d] hover:text-white"
+              className="rounded-md p-1.5 text-ink-muted hover:text-ink hover:bg-border/60 active:scale-95 transition-all"
               title="Увеличить (+)"
             >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 4v16m8-8H4"
-                />
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-            </button>
-            <button
-              onClick={() => setScale(1.2)}
-              className="rounded px-2 py-1 text-[11px] text-[#a19888] transition hover:bg-[#34312d] hover:text-white"
-              title="Сбросить масштаб"
-            >
-              100%
             </button>
           </div>
 
-          <div className="hidden h-4 w-[1px] bg-[#3e3b36] sm:block" />
+          <div className="h-4 w-px bg-border mx-0.5" />
 
-          {/* Switch to text reader */}
+          {/* Switch to text reader if available */}
           <Link
-            href={`/books/${book.id}/read`}
-            className="flex items-center gap-1.5 rounded-md bg-[#34312d] px-3 py-1.5 text-xs font-medium text-[#e8dfcf] transition hover:bg-[#433f3a] hover:text-white"
+            href={`/books/${book.id}/read?mode=text`}
+            className="hidden md:flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-ink-muted hover:text-ink hover:bg-border/60 transition-colors"
             title="Переключиться в текстовый режим"
           >
-            <svg
-              className="h-3.5 w-3.5 text-[#d97736]"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h7"
-              />
+            <svg className="h-3.5 w-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
             </svg>
-            <span className="hidden md:inline">Текстовый режим</span>
-            <span className="md:hidden">Текст</span>
+            <span>Текст</span>
+          </Link>
+
+          {/* Back to book button */}
+          <Link
+            href={`/books/${book.id}`}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs sm:text-sm font-medium text-ink-muted hover:text-ink hover:bg-border/60 transition-colors"
+            title="Вернуться к информации о книге"
+          >
+            <span className="hidden md:inline">К книге</span>
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </Link>
         </div>
       </header>
 
       {/* Main Content Area: Search Sidebar + Canvas Viewport */}
-      <div className="relative flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden bg-paper">
         {/* In-Book Search Drawer (ТЗ §4) */}
         {searchOpen && (
-          <aside className="absolute inset-y-0 left-0 z-30 flex w-80 flex-col border-r border-[#33302c] bg-[#242220] shadow-2xl transition-all">
-            <div className="flex items-center justify-between border-b border-[#33302c] p-3">
-              <span className="text-xs font-medium text-[#e8dfcf]">
+          <aside className="absolute inset-y-0 left-0 z-30 flex w-80 flex-col border-r border-border bg-paper-soft shadow-2xl transition-all">
+            <div className="flex items-center justify-between border-b border-border p-3">
+              <span className="text-xs font-serif font-medium text-ink">
                 Поиск по содержимому книги
               </span>
               <button
                 onClick={() => setSearchOpen(false)}
-                className="rounded p-1 text-[#888072] hover:bg-[#34312d] hover:text-white"
+                className="rounded-md p-1 text-ink-muted hover:bg-border/60 hover:text-ink transition-colors"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -621,11 +558,11 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Введите слово или фразу…"
-                  className="w-full rounded-md border border-[#44403a] bg-[#1a1918] py-2 pl-8 pr-3 text-xs text-white placeholder:text-[#888072] focus:border-[#d97736] focus:outline-none"
+                  className="w-full rounded-md border border-border bg-paper py-2 pl-8 pr-3 text-xs text-ink placeholder:text-ink-muted focus:border-accent focus:outline-none"
                 />
-                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 text-[#888072]">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 text-ink-muted">
                   {isSearching ? (
-                    <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#888072] border-t-[#d97736]" />
+                    <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-accent" />
                   ) : (
                     <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -638,14 +575,14 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
             {/* Results list */}
             <div className="flex-1 overflow-y-auto px-3 pb-3">
               {searchQuery.trim().length >= 2 && searchResults.length === 0 && !isSearching && (
-                <p className="mt-4 text-center text-xs text-[#888072]">
+                <p className="mt-4 text-center text-xs text-ink-muted">
                   Ничего не найдено в тексте книги
                 </p>
               )}
 
               {searchResults.length > 0 && (
                 <div className="flex flex-col gap-2">
-                  <p className="text-[11px] font-medium text-[#888072]">
+                  <p className="text-[11px] font-medium text-ink-muted">
                     Найдено совпадений: {searchResults.length}
                   </p>
                   {searchResults.map((res, i) => (
@@ -654,17 +591,17 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
                       onClick={() => jumpToPage(res.pageNumber)}
                       className={`group flex flex-col items-start rounded-lg border p-2.5 text-left transition-colors ${
                         currentPage === res.pageNumber
-                          ? "border-[#d97736] bg-[#d97736]/10"
-                          : "border-[#38342f] bg-[#1a1918] hover:border-[#524d45] hover:bg-[#201e1c]"
+                          ? "border-accent bg-accent/10"
+                          : "border-border bg-paper hover:border-accent/40 hover:bg-paper-soft"
                       }`}
                     >
-                      <div className="flex w-full items-center justify-between text-[11px] font-medium text-[#d97736]">
+                      <div className="flex w-full items-center justify-between text-[11px] font-medium text-accent">
                         <span>Страница {res.pageNumber}</span>
-                        <span className="text-[10px] text-[#888072] group-hover:text-white">
+                        <span className="text-[10px] text-ink-muted group-hover:text-ink">
                           Перейти →
                         </span>
                       </div>
-                      <p className="mt-1 text-xs leading-relaxed text-[#c4b9a7] line-clamp-2">
+                      <p className="mt-1 text-xs leading-relaxed text-ink line-clamp-2">
                         {res.snippet}
                       </p>
                     </button>
@@ -676,16 +613,16 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
         )}
 
         {/* Main Canvas Viewport Area */}
-        <main className="relative flex flex-1 items-start justify-center overflow-auto p-4 sm:p-8">
+        <main className="relative flex flex-1 items-start justify-center overflow-auto p-4 sm:p-8 bg-paper">
           {isLoading && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#1c1b1a]/90 backdrop-blur-xs z-10">
-              <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#44403a] border-t-[#d97736]" />
-              <p className="font-serif text-sm text-[#e8dfcf]">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-paper/90 backdrop-blur-xs z-10 text-ink">
+              <div className="h-9 w-9 animate-spin rounded-full border-2 border-border border-t-accent" />
+              <p className="font-serif text-sm text-ink">
                 Потоковая загрузка PDF (HTTP 206)…
               </p>
-              <div className="h-1.5 w-48 overflow-hidden rounded-full bg-[#2e2b27]">
+              <div className="h-1.5 w-48 overflow-hidden rounded-full bg-border">
                 <div
-                  className="h-full bg-[#d97736] transition-all duration-200"
+                  className="h-full bg-accent transition-all duration-200"
                   style={{ width: `${loadingProgress}%` }}
                 />
               </div>
@@ -693,19 +630,19 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
           )}
 
           {error && (
-            <div className="mx-auto max-w-md rounded-xl border border-red-500/20 bg-red-950/20 p-6 text-center text-red-200">
+            <div className="mx-auto max-w-md rounded-xl border border-red-500/20 bg-red-950/20 p-6 text-center text-red-700">
               <p className="font-medium">Не удалось открыть PDF</p>
-              <p className="mt-2 text-xs text-red-300/80">{error}</p>
+              <p className="mt-2 text-xs text-red-600/80">{error}</p>
               <div className="mt-5 flex justify-center gap-3">
                 <Link
                   href={`/books/${book.id}/read`}
-                  className="rounded-md bg-[#d97736] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#c26526]"
+                  className="rounded-md bg-accent px-4 py-2 text-xs font-medium text-paper-soft transition hover:opacity-90"
                 >
                   Открыть в текстовом ридере
                 </Link>
                 <button
                   onClick={() => window.location.reload()}
-                  className="rounded-md border border-[#44403a] px-4 py-2 text-xs text-[#c4b9a7] transition hover:bg-[#2e2b27]"
+                  className="rounded-md border border-border px-4 py-2 text-xs text-ink transition hover:bg-paper-soft"
                 >
                   Повторить
                 </button>
@@ -716,7 +653,7 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
           <div className="flex flex-col items-center">
             <canvas
               ref={canvasRef}
-              className="rounded-sm bg-white shadow-2xl transition-transform"
+              className="rounded-xs bg-white shadow-xl border border-border/70 transition-transform"
               style={{
                 display: isLoading || error ? "none" : "block",
               }}
@@ -726,11 +663,11 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
       </div>
 
       {/* Bottom Floating Quick Pagination on Mobile */}
-      <div className="flex items-center justify-between border-t border-[#33302c] bg-[#242220] px-4 py-2 text-xs text-[#a19888] sm:hidden">
+      <div className="flex items-center justify-between border-t border-border bg-paper-soft px-4 py-2 text-xs text-ink-muted sm:hidden">
         <button
           onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
           disabled={currentPage <= 1 || isLoading}
-          className="rounded px-3 py-1 bg-[#34312d] text-white disabled:opacity-30"
+          className="rounded px-3 py-1 bg-border/60 text-ink hover:bg-border active:scale-95 disabled:opacity-30"
         >
           Назад
         </button>
@@ -740,7 +677,7 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
         <button
           onClick={() => setCurrentPage((p) => Math.min(p + 1, numPages))}
           disabled={currentPage >= numPages || isLoading}
-          className="rounded px-3 py-1 bg-[#34312d] text-white disabled:opacity-30"
+          className="rounded px-3 py-1 bg-border/60 text-ink hover:bg-border active:scale-95 disabled:opacity-30"
         >
           Вперед
         </button>

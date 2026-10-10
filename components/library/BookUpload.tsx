@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { getBookReaderUrl } from "@/lib/books/reader-url";
 
 type UploadState =
   | { status: "idle" }
@@ -19,16 +20,18 @@ type UploadState =
       author: string;
       chaptersCount: number;
       coverUrl?: string | null;
+      contentFormat?: string | null;
     }
   | { status: "error"; message: string };
 
 const ACCEPTED_TYPES = [
   "application/pdf",
+  "application/epub+zip",
   "text/plain",
   "text/markdown",
   "application/json",
 ];
-const ACCEPTED_EXTENSIONS = [".pdf", ".txt", ".md", ".json"];
+const ACCEPTED_EXTENSIONS = [".pdf", ".epub", ".txt", ".md", ".json"];
 const MAX_SIZE_MB = 50;
 
 export function BookUpload() {
@@ -37,7 +40,7 @@ export function BookUpload() {
   const [state, setState] = useState<UploadState>({ status: "idle" });
 
   const isValidFile = useCallback((file: File) => {
-    if (ACCEPTED_TYPES.includes(file.type)) return true;
+    if (file.type && ACCEPTED_TYPES.includes(file.type)) return true;
     return ACCEPTED_EXTENSIONS.some((ext) =>
       file.name.toLowerCase().endsWith(ext)
     );
@@ -48,7 +51,7 @@ export function BookUpload() {
       if (!isValidFile(file)) {
         setState({
           status: "error",
-          message: "Поддерживаемые форматы: PDF, TXT, MD, JSON",
+          message: "Поддерживаемые форматы: PDF, EPUB, TXT, MD, JSON",
         });
         return;
       }
@@ -174,6 +177,7 @@ export function BookUpload() {
           author?: string;
           chaptersCount?: number;
           coverUrl?: string | null;
+          contentFormat?: string | null;
         } = {};
         try {
           data = JSON.parse(resText);
@@ -200,6 +204,13 @@ export function BookUpload() {
           author: data.author || "Неизвестный автор",
           chaptersCount: data.chaptersCount || 0,
           coverUrl: data.coverUrl,
+          contentFormat:
+            data.contentFormat ||
+            (file.name.toLowerCase().endsWith(".epub")
+              ? "EPUB"
+              : file.name.toLowerCase().endsWith(".pdf")
+              ? "PDF"
+              : "TEXT"),
         });
 
         // Refresh library page data in background
@@ -311,7 +322,14 @@ export function BookUpload() {
             <div className="mt-6 flex flex-wrap justify-center sm:justify-start gap-3">
               <button
                 type="button"
-                onClick={() => router.push(`/books/${state.bookId}/read`)}
+                onClick={() =>
+                  router.push(
+                    getBookReaderUrl({
+                      id: state.bookId,
+                      contentFormat: state.contentFormat,
+                    })
+                  )
+                }
                 className="inline-flex items-center gap-2 rounded-xl bg-accent px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:opacity-95 active:scale-95 transition-all"
               >
                 <span>Начать читать</span>
@@ -385,7 +403,7 @@ export function BookUpload() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.txt,.md,.json,application/pdf,text/plain,text/markdown,application/json"
+          accept=".pdf,.epub,.txt,.md,.json,application/pdf,application/epub+zip,text/plain,text/markdown,application/json"
           onChange={handleFileSelect}
           className="hidden"
         />
@@ -420,14 +438,14 @@ export function BookUpload() {
         <p className="text-base font-semibold text-ink">
           {state.status === "dragging"
             ? "Отпустите файл для загрузки"
-            : "Перетащите PDF сюда или нажмите для выбора"}
+            : "Нажмите, чтобы выбрать файл"}
         </p>
 
         <p className="mt-2 text-xs text-ink-muted">
-          ⚡ <strong>100% Автоматически:</strong> название, автор, обложка и главы сформируются сами
+          ⚡ <strong>100% Автоматически:</strong> название, автор, обложка сформируются сами
         </p>
         <p className="mt-1 text-[11px] text-ink-muted/60">
-          Поддерживаются PDF, TXT, MD до {MAX_SIZE_MB} МБ
+          Поддерживаемые форматы: PDF, EPUB, TXT, MD, JSON (до {MAX_SIZE_MB} МБ)
         </p>
 
         {state.status === "error" && (

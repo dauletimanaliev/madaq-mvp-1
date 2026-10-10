@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getBookById } from "@/server/books/queries";
 import { PdfReader } from "@/components/reader/PdfReader";
@@ -18,6 +18,10 @@ export default async function BookPdfPage({
     notFound();
   }
 
+  if (book.contentFormat === "EPUB" && !book.storageS3Key) {
+    redirect(`/books/${book.id}/epub`);
+  }
+
   const supabaseUrl =
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
@@ -29,9 +33,9 @@ export default async function BookPdfPage({
 
   if (!pdfUrl) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#1c1b1a] px-6 py-12 text-[#f4efe6]">
-        <div className="max-w-md rounded-2xl border border-[#38342f] bg-[#242220] p-8 text-center shadow-xl">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#d97736]/10 text-[#d97736]">
+      <div className="flex min-h-screen items-center justify-center bg-paper px-6 py-12 text-ink">
+        <div className="max-w-md rounded-2xl border border-border bg-paper-soft p-8 text-center shadow-xl">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent">
             <svg
               className="h-6 w-6"
               fill="none"
@@ -46,23 +50,23 @@ export default async function BookPdfPage({
               />
             </svg>
           </div>
-          <h2 className="mt-4 font-serif text-xl font-medium">
+          <h2 className="mt-4 font-serif text-xl font-medium text-ink">
             Оригинальный PDF не найден
           </h2>
-          <p className="mt-2 text-sm text-[#a19888]">
+          <p className="mt-2 text-sm text-ink-muted">
             Эта книга была добавлена в текстовом формате или до включения
             сохранения PDF в облаке.
           </p>
           <div className="mt-6 flex flex-col gap-2.5">
             <Link
               href={`/books/${book.id}/read`}
-              className="rounded-lg bg-[#d97736] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#c26526]"
+              className="rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-paper-soft transition hover:opacity-90"
             >
               Открыть в ридере текста
             </Link>
             <Link
               href={`/books/${book.id}`}
-              className="rounded-lg border border-[#3e3a34] px-4 py-2.5 text-sm text-[#c4b9a7] transition hover:bg-[#2e2b27]"
+              className="rounded-lg border border-border px-4 py-2.5 text-sm text-ink transition hover:bg-border/60"
             >
               Вернуться к книге
             </Link>
