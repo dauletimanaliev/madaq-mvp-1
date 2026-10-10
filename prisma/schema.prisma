@@ -27,6 +27,12 @@ enum UploadJobStatus {
   FAILED
 }
 
+enum ContentFormat {
+  TEXT
+  PDF
+  EPUB
+}
+
 // ──────────────────────────────
 // Author 1 ─── N Book
 // ──────────────────────────────
@@ -54,12 +60,16 @@ model Book {
   publishedYear Int?     @map("published_year")
   createdAt     DateTime @default(now()) @map("created_at")
 
-  // ── Ingestion Pipeline fields (ТЗ §1, §2, §5) ──
-  fileHashSha256 String?  @unique @map("file_hash_sha256") // SHA-256 дедупликация
-  fileSizeBytes  Int?     @map("file_size_bytes")           // размер исходного файла
-  totalPages     Int?     @map("total_pages")               // количество страниц PDF
-  isLinearized   Boolean  @default(false) @map("is_linearized") // Fast Web View
-  storageS3Key   String?  @map("storage_s3_key")            // путь к PDF в S3/Supabase Storage
+  // ── Ingestion Pipeline fields ──
+  fileHashSha256 String?  @unique @map("file_hash_sha256")
+  fileSizeBytes  Int?     @map("file_size_bytes")
+  totalPages     Int?     @map("total_pages")
+  isLinearized   Boolean  @default(false) @map("is_linearized")
+  storageS3Key   String?  @map("storage_s3_key")
+
+  // ── Format ──
+  contentFormat  ContentFormat @default(TEXT) @map("content_format")
+  epubStorageKey String?       @map("epub_storage_key") // путь к .epub в Supabase Storage
 
   authorId String @map("author_id")
   author   Author @relation(fields: [authorId], references: [id])

@@ -6,6 +6,9 @@ import { parseBookText, normalizeContent } from "@/lib/books/parser";
 import type { ParsedBook } from "@/lib/books/parser";
 import { extractPdfWithFormatting } from "@/lib/books/pdf-formatter";
 import { linearizePdf } from "@/lib/books/linearizer";
+import { validateEpubBytes, parseEpubMetadata } from "@/lib/books/epub-parser";
+import type { EpubMetadata } from "@/lib/books/epub-parser";
+import { extractEpubCover } from "@/lib/books/epub-cover";
 
 export const maxDuration = 60; // allow up to 60s for large PDFs
 
@@ -275,7 +278,9 @@ function safeStorageKey(text: string): string {
 // ─── Upload cover to Supabase Storage ──────────────────────────────────────
 async function uploadCoverToSupabase(
   coverKey: string,
-  coverBuffer: ArrayBuffer
+  coverBuffer: ArrayBuffer | Buffer,
+  contentType: string = "image/png",
+  fileExt: string = "png"
 ): Promise<string | null> {
   const supabaseUrl =
     process.env.SUPABASE_URL || "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
@@ -287,7 +292,12 @@ async function uploadCoverToSupabase(
   }
 
   try {
-    const filePath = coverKey.endsWith(".png") ? coverKey : `${coverKey}.png`;
+    const cleanExt = fileExt.replace(/^\./, "");
+    const filePath = coverKey.endsWith(`.${cleanExt}`) ? coverKey : `${coverKey}.${cleanExt}`;
+    const buf = Buffer.isBuffer(coverBuffer)
+      ? coverBuffer
+      : Buffer.from(coverBuffer as ArrayBuffer);
+
     const res = await fetch(
       `${supabaseUrl}/storage/v1/object/book-covers/${filePath}`,
       {
@@ -295,10 +305,10 @@ async function uploadCoverToSupabase(
         headers: {
           authorization: `Bearer ${serviceRoleKey}`,
           apikey: serviceRoleKey,
-          "content-type": "image/png",
+          "content-type": contentType,
           "x-upsert": "true",
         },
-        body: Buffer.from(coverBuffer),
+        body: new Uint8Array(buf),
       }
     );
 
@@ -311,6 +321,49 @@ async function uploadCoverToSupabase(
     return null;
   } catch (err) {
     console.error("Supabase cover upload error:", err);
+    return null;
+  }
+}
+
+// ─── Upload original EPUB to Supabase Storage ──────────────────────────────
+async function uploadEpubToSupabase(
+  fileHashSha256: string,
+  epubBuffer: Buffer
+): Promise<string | null> {
+  const supabaseUrl =
+    process.env.SUPABASE_URL || "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!serviceRoleKey) {
+    console.warn("SUPABASE_SERVICE_ROLE_KEY not set, EPUB upload skipped");
+    return null;
+  }
+
+  try {
+    const s3Path = `books/${fileHashSha256}.epub`;
+    const res = await fetch(
+      `${supabaseUrl}/storage/v1/object/book-epubs/${s3Path}`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${serviceRoleKey}`,
+          apikey: serviceRoleKey,
+          "content-type": "application/epub+zip",
+          "x-upsert": "true",
+        },
+        body: new Uint8Array(epubBuffer),
+      }
+    );
+
+    if (res.ok) {
+      return s3Path;
+    }
+
+    const errText = await res.text();
+    console.error(`Supabase EPUB upload failed (${res.status}):`, errText);
+    return null;
+  } catch (err) {
+    console.error("Supabase EPUB upload error:", err);
     return null;
   }
 }
@@ -433,13 +486,21 @@ export async function POST(request: NextRequest) {
 
     const ext = fileName.split(".").pop()?.toLowerCase();
     const isPdf = ext === "pdf";
+    const isEpub = ext === "epub";
 
-    // 1. Валидация магических байт для PDF (ТЗ §1)
+    // 1. Валидация магических байт для PDF и EPUB (ТЗ §1)
     if (isPdf) {
       const magicBytes = fileBuffer.subarray(0, 4).toString("ascii");
       if (!magicBytes.startsWith("%PDF")) {
         return NextResponse.json(
           { error: "Файл поврежден или не является корректным PDF (отсутствует сигнатура %PDF)" },
+          { status: 400 }
+        );
+      }
+    } else if (isEpub) {
+      if (!validateEpubBytes(fileBuffer)) {
+        return NextResponse.json(
+          { error: "Файл поврежден или не является корректным EPUB (неверный ZIP-заголовок)" },
           { status: 400 }
         );
       }
@@ -509,6 +570,143 @@ export async function POST(request: NextRequest) {
       });
     } catch (jobErr) {
       console.warn("UploadJob creation error:", jobErr);
+    }
+
+    // ─── EPUB Ingestion Pipeline ─────────────────────────────────────────────
+    if (isEpub) {
+      // Удаляем временный файл из хранилища, если он был загружен
+      if (tempStoragePathToDelete && serviceRoleKey) {
+        fetch(
+          `${supabaseUrl}/storage/v1/object/book-covers/${tempStoragePathToDelete}`,
+          {
+            method: "DELETE",
+            headers: {
+              authorization: `Bearer ${serviceRoleKey}`,
+              apikey: serviceRoleKey,
+            },
+          }
+        ).catch(() => {});
+      }
+
+      if (uploadJob) {
+        await prisma.uploadJob.update({
+          where: { id: uploadJob.id },
+          data: {
+            step: 2,
+            stepText: "Извлечение метаданных и обложки из EPUB...",
+          },
+        }).catch(() => {});
+      }
+
+      let epubMeta: EpubMetadata;
+      try {
+        epubMeta = parseEpubMetadata(fileBuffer);
+      } catch (parseErr) {
+        console.warn("EPUB metadata parse warning:", parseErr);
+        epubMeta = { opfPath: "" };
+      }
+
+      const fnInfo = parseFilename(fileName);
+      const title =
+        epubMeta.title && !isGarbageTitle(epubMeta.title)
+          ? epubMeta.title.trim()
+          : fnInfo.title || fileName.replace(/\.[^.]+$/, "");
+      const authorName =
+        epubMeta.author && !isGarbageAuthor(epubMeta.author)
+          ? epubMeta.author.trim()
+          : fnInfo.author || "Белгісіз автор";
+      const description = epubMeta.description || null;
+      const language = epubMeta.language || "ru";
+
+      // Извлечение оригинальной обложки (без конвертации в PNG)
+      let coverUrl: string | null = null;
+      try {
+        const extractedCover = extractEpubCover(fileBuffer, epubMeta.coverItem);
+        if (extractedCover) {
+          coverUrl = await uploadCoverToSupabase(
+            fileHashSha256,
+            extractedCover.buffer,
+            extractedCover.mimeType,
+            extractedCover.extension
+          );
+        }
+      } catch (coverErr) {
+        console.warn("EPUB cover extraction error:", coverErr);
+      }
+
+      // Сохранение оригинального EPUB в Supabase Storage
+      if (uploadJob) {
+        await prisma.uploadJob.update({
+          where: { id: uploadJob.id },
+          data: {
+            step: 3,
+            stepText: "Сохранение исходного EPUB в хранилище...",
+          },
+        }).catch(() => {});
+      }
+
+      const epubStorageKey = await uploadEpubToSupabase(fileHashSha256, fileBuffer);
+
+      // Поиск или создание автора
+      let author = await prisma.author.findFirst({
+        where: { name: authorName },
+      });
+      if (!author) {
+        author = await prisma.author.create({
+          data: { name: authorName },
+        });
+      }
+
+      const randomSuffix = Math.random().toString(36).substring(2, 7);
+      const asciiSlug = safeStorageKey(title).replace(/-/g, "_") || "book";
+      const bookId = `book_${asciiSlug}_${randomSuffix}`;
+
+      // Создание записи Book (формат EPUB, без Chapter / BookPage)
+      const book = await prisma.book.create({
+        data: {
+          id: bookId,
+          title,
+          description,
+          coverUrl,
+          language,
+          authorId: author.id,
+          fileHashSha256,
+          fileSizeBytes: fileBuffer.length,
+          totalPages: 0,
+          contentFormat: "EPUB",
+          epubStorageKey,
+        },
+      });
+
+      if (uploadJob) {
+        await prisma.uploadJob.update({
+          where: { id: uploadJob.id },
+          data: {
+            status: "SUCCESS",
+            step: 5,
+            stepText: "EPUB книга успешно сохранена",
+            bookId: book.id,
+          },
+        }).catch(() => {});
+      }
+
+      console.log(
+        `✅ EPUB Book "${title}" by "${authorName}" created: cover: ${coverUrl ? "✅" : "❌"}, Storage: ${epubStorageKey ? "✅" : "❌"}`
+      );
+
+      return NextResponse.json({
+        jobId: uploadJob?.id,
+        bookId: book.id,
+        title: book.title,
+        author: author.name,
+        chaptersCount: 0,
+        totalChars: 0,
+        coverUrl: book.coverUrl,
+        fileHashSha256,
+        totalPages: 0,
+        contentFormat: "EPUB",
+        epubStorageKey: book.epubStorageKey,
+      });
     }
 
     let rawText: string;
@@ -736,6 +934,7 @@ export async function POST(request: NextRequest) {
         totalPages: totalPages > 0 ? totalPages : parsedBook.chapters.length,
         isLinearized,
         storageS3Key,
+        contentFormat: isPdf ? "PDF" : "TEXT",
       },
     });
 
