@@ -2,11 +2,20 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
-import type { Book } from "@/lib/types";
+import type { Book, Highlight, HighlightType, PdfHighlightRect } from "@/lib/types";
+import { HighlightMenu, type SelectionRange } from "./HighlightMenu";
+import {
+  fetchPdfPageHighlights,
+  savePdfHighlight,
+  updatePdfHighlightCategory,
+  removePdfHighlight,
+} from "@/app/books/[bookId]/pdf/actions";
+import "pdfjs-dist/web/pdf_viewer.css";
 
 interface PdfReaderProps {
   book: Book;
   pdfUrl: string;
+  initialPage?: number;
 }
 
 interface SearchResult {
@@ -14,14 +23,90 @@ interface SearchResult {
   snippet: string;
 }
 
-export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
+const highlightBgStyles: Record<HighlightType, string> = {
+  protein: "bg-red-400/40 border-b border-red-500/50",
+  carbohydrate: "bg-orange-400/40 border-b border-orange-500/50",
+  fat: "bg-amber-300/45 border-b border-amber-500/50",
+  vitamin: "bg-emerald-400/40 border-b border-emerald-500/50",
+  fiber: "bg-sky-400/40 border-b border-sky-500/50",
+};
+
+function normalizeAndMergeRects(
+  clientRects: DOMRect[],
+  containerRect: DOMRect
+): PdfHighlightRect[] {
+  if (!containerRect.width || !containerRect.height) return [];
+
+  const rawBoxes = clientRects
+    .map((r) => {
+      const left = Math.max(containerRect.left, Math.min(containerRect.right, r.left));
+      const right = Math.max(containerRect.left, Math.min(containerRect.right, r.right));
+      const top = Math.max(containerRect.top, Math.min(containerRect.bottom, r.top));
+      const bottom = Math.max(containerRect.top, Math.min(containerRect.bottom, r.bottom));
+
+      const width = right - left;
+      const height = bottom - top;
+
+      if (width <= 1 || height <= 1) return null;
+
+      return {
+        x: (left - containerRect.left) / containerRect.width,
+        y: (top - containerRect.top) / containerRect.height,
+        width: width / containerRect.width,
+        height: height / containerRect.height,
+      };
+    })
+    .filter((b): b is PdfHighlightRect => b !== null && b.width > 0.001 && b.height > 0.001);
+
+  if (rawBoxes.length <= 1) return rawBoxes;
+
+  // Sort by vertical position (y), then horizontal (x)
+  rawBoxes.sort((a, b) => {
+    if (Math.abs(a.y - b.y) > 0.007) {
+      return a.y - b.y;
+    }
+    return a.x - b.x;
+  });
+
+  const merged: PdfHighlightRect[] = [];
+  let current = { ...rawBoxes[0] };
+
+  for (let i = 1; i < rawBoxes.length; i++) {
+    const next = rawBoxes[i];
+    const isSameLine =
+      Math.abs(current.y - next.y) < 0.008 &&
+      Math.abs(current.height - next.height) < 0.012;
+
+    const currentRight = current.x + current.width;
+    const isAdjacent = next.x <= currentRight + 0.015 && next.x >= current.x - 0.005;
+
+    if (isSameLine && isAdjacent) {
+      const newRight = Math.max(currentRight, next.x + next.width);
+      current.width = newRight - current.x;
+      current.y = Math.min(current.y, next.y);
+      current.height = Math.max(current.height, next.height);
+    } else {
+      merged.push(current);
+      current = { ...next };
+    }
+  }
+  merged.push(current);
+
+  return merged;
+}
+
+export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
   const [numPages, setNumPages] = useState<number>(book.totalPages || 0);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [currentPage, setCurrentPage] = useState<number>(
+    initialPage && initialPage >= 1 ? initialPage : 1
+  );
   const [scale, setScale] = useState<number>(1.2);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadingProgress, setLoadingProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
-  const [pageInput, setPageInput] = useState<string>("1");
+  const [pageInput, setPageInput] = useState<string>(
+    String(initialPage && initialPage >= 1 ? initialPage : 1)
+  );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [activePdfUrl, setActivePdfUrl] = useState<string>(pdfUrl);
 
@@ -31,9 +116,25 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState<boolean>(false);
 
+  // Highlights and TextLayer state
+  const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [activeSelection, setActiveSelection] = useState<SelectionRange | null>(null);
+  const [pendingHighlightData, setPendingHighlightData] = useState<{
+    rects: PdfHighlightRect[];
+    selectedText: string;
+  } | null>(null);
+  const [pageDimensions, setPageDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pageContainerRef = useRef<HTMLDivElement | null>(null);
+  const textLayerRef = useRef<HTMLDivElement | null>(null);
   const pdfDocRef = useRef<any>(null);
+  const pdfjsLibRef = useRef<any>(null);
   const renderTaskRef = useRef<any>(null);
+  const textLayerTaskRef = useRef<any>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
 
@@ -63,6 +164,10 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
   useEffect(() => {
     let active = true;
     async function restoreProgress() {
+      if (initialPage && initialPage >= 1) {
+        return;
+      }
+
       try {
         // Fast local restore first
         const local = localStorage.getItem(`madaq_progress_${book.id}`);
@@ -99,7 +204,7 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
     return () => {
       active = false;
     };
-  }, [book.id]);
+  }, [book.id, initialPage]);
 
   // 3. Auto-save reading progress on page change (debounced 600ms, ТЗ §1)
   useEffect(() => {
@@ -132,6 +237,7 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
       try {
         const pdfjs = await import("pdfjs-dist");
         pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+        pdfjsLibRef.current = pdfjs;
 
         setLoadingProgress(30);
 
@@ -184,7 +290,7 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
     };
   }, [activePdfUrl]);
 
-  // 5. Render Current Page
+  // 5. Render Current Page & TextLayer
   const renderPage = useCallback(
     async (pageNum: number) => {
       if (!pdfDocRef.current || !canvasRef.current) return;
@@ -202,10 +308,14 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
         const viewport = page.getViewport({ scale });
         const outputScale = window.devicePixelRatio || 1;
 
+        const vpWidth = Math.floor(viewport.width);
+        const vpHeight = Math.floor(viewport.height);
+        setPageDimensions({ width: vpWidth, height: vpHeight });
+
         canvas.width = Math.floor(viewport.width * outputScale);
         canvas.height = Math.floor(viewport.height * outputScale);
-        canvas.style.width = `${Math.floor(viewport.width)}px`;
-        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        canvas.style.width = `${vpWidth}px`;
+        canvas.style.height = `${vpHeight}px`;
 
         const transform =
           outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
@@ -219,6 +329,31 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
         const renderTask = page.render(renderContext);
         renderTaskRef.current = renderTask;
         await renderTask.promise;
+
+        // Render PDF TextLayer
+        if (textLayerRef.current && pdfjsLibRef.current) {
+          if (textLayerTaskRef.current) {
+            textLayerTaskRef.current.cancel?.();
+            textLayerTaskRef.current = null;
+          }
+          textLayerRef.current.innerHTML = "";
+          try {
+            const textContent = await page.getTextContent();
+            if (textContent.items.length > 0) {
+              const textLayer = new pdfjsLibRef.current.TextLayer({
+                textContentSource: textContent,
+                container: textLayerRef.current,
+                viewport,
+              });
+              textLayerTaskRef.current = textLayer;
+              await textLayer.render();
+            }
+          } catch (textErr: any) {
+            if (textErr?.name !== "RenderingCancelledException") {
+              console.warn("Text layer render error / scanned page:", textErr);
+            }
+          }
+        }
       } catch (err: any) {
         if (err?.name !== "RenderingCancelledException") {
           console.warn("PDF page render warning:", err);
@@ -227,6 +362,176 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
     },
     [scale]
   );
+
+  // Load highlights for current page
+  useEffect(() => {
+    let active = true;
+    async function loadHighlights() {
+      try {
+        const pageHighlights = await fetchPdfPageHighlights(book.id, currentPage);
+        if (active) {
+          setHighlights(pageHighlights);
+        }
+      } catch (err) {
+        console.warn("Could not load PDF page highlights:", err);
+      }
+    }
+    loadHighlights();
+    setActiveSelection(null);
+    setPendingHighlightData(null);
+    return () => {
+      active = false;
+    };
+  }, [book.id, currentPage]);
+
+  const handlePageSelectionEnd = useCallback(() => {
+    setTimeout(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        return;
+      }
+
+      const selText = sel.toString().trim();
+      if (!selText || !pageContainerRef.current) {
+        return;
+      }
+
+      const range = sel.getRangeAt(0);
+      if (!pageContainerRef.current.contains(range.commonAncestorContainer)) {
+        return;
+      }
+
+      const containerRect = pageContainerRef.current.getBoundingClientRect();
+      const clientRects = Array.from(range.getClientRects());
+      const mergedRects = normalizeAndMergeRects(clientRects, containerRect);
+
+      if (mergedRects.length === 0) {
+        return;
+      }
+
+      const overallRect = range.getBoundingClientRect();
+      setPendingHighlightData({
+        rects: mergedRects,
+        selectedText: selText,
+      });
+      setActiveSelection({
+        rect: overallRect,
+        existingHighlight: null,
+      });
+    }, 20);
+  }, []);
+
+  const handleContainerClick = (e: React.MouseEvent) => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) {
+      return;
+    }
+
+    if (!pageContainerRef.current) return;
+    const containerRect = pageContainerRef.current.getBoundingClientRect();
+    const clickX = (e.clientX - containerRect.left) / containerRect.width;
+    const clickY = (e.clientY - containerRect.top) / containerRect.height;
+
+    const hitHighlight = highlights.find((h) => {
+      const rects = (h.rects as PdfHighlightRect[]) || [];
+      return rects.some(
+        (r) =>
+          clickX >= r.x - 0.005 &&
+          clickX <= r.x + r.width + 0.005 &&
+          clickY >= r.y - 0.005 &&
+          clickY <= r.y + r.height + 0.005
+      );
+    });
+
+    if (hitHighlight) {
+      setPendingHighlightData(null);
+      setActiveSelection({
+        rect: {
+          left: e.clientX,
+          top: e.clientY,
+          right: e.clientX,
+          bottom: e.clientY,
+          width: 0,
+          height: 0,
+        } as DOMRect,
+        existingHighlight: hitHighlight,
+      });
+    } else {
+      if (activeSelection) {
+        setActiveSelection(null);
+        setPendingHighlightData(null);
+      }
+    }
+  };
+
+  const handleSelectHighlightColor = async (type: HighlightType) => {
+    if (activeSelection?.existingHighlight) {
+      const targetId = activeSelection.existingHighlight.id;
+      const updated: Highlight = {
+        ...activeSelection.existingHighlight,
+        type,
+      };
+      setHighlights((prev) =>
+        prev.map((h) => (h.id === targetId ? updated : h))
+      );
+      setActiveSelection(null);
+
+      try {
+        await updatePdfHighlightCategory(targetId, type);
+      } catch (err) {
+        console.warn("Failed to update highlight category:", err);
+      }
+    } else if (pendingHighlightData) {
+      const { rects, selectedText } = pendingHighlightData;
+      const tempId = `temp-${Date.now()}`;
+      const tempHighlight: Highlight = {
+        id: tempId,
+        bookId: book.id,
+        pageNumber: currentPage,
+        rects,
+        selectedText,
+        type,
+        legacyColor: null,
+        createdAt: new Date().toISOString(),
+      };
+      setHighlights((prev) => [...prev, tempHighlight]);
+      setActiveSelection(null);
+      setPendingHighlightData(null);
+      window.getSelection()?.removeAllRanges();
+
+      try {
+        const res = await savePdfHighlight({
+          bookId: book.id,
+          pageNumber: currentPage,
+          rects,
+          selectedText,
+          type,
+        });
+        if (res.ok) {
+          setHighlights((prev) =>
+            prev.map((h) => (h.id === tempId ? res.highlight : h))
+          );
+        } else {
+          setHighlights((prev) => prev.filter((h) => h.id !== tempId));
+        }
+      } catch {
+        setHighlights((prev) => prev.filter((h) => h.id !== tempId));
+      }
+    }
+  };
+
+  const handleDeleteHighlight = async () => {
+    if (!activeSelection?.existingHighlight) return;
+    const targetId = activeSelection.existingHighlight.id;
+    setHighlights((prev) => prev.filter((h) => h.id !== targetId));
+    setActiveSelection(null);
+
+    try {
+      await removePdfHighlight(targetId);
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     if (!isLoading && pdfDocRef.current) {
@@ -651,15 +956,70 @@ export function PdfReader({ book, pdfUrl }: PdfReaderProps) {
           )}
 
           <div className="flex flex-col items-center">
-            <canvas
-              ref={canvasRef}
-              className="rounded-xs bg-white shadow-xl border border-border/70 transition-transform"
+            <div
+              ref={pageContainerRef}
+              onMouseUp={handlePageSelectionEnd}
+              onTouchEnd={handlePageSelectionEnd}
+              onClick={handleContainerClick}
+              className="relative rounded-xs bg-white shadow-xl border border-border/70 select-text overflow-hidden"
               style={{
                 display: isLoading || error ? "none" : "block",
+                width: pageDimensions?.width ? `${pageDimensions.width}px` : undefined,
+                height: pageDimensions?.height ? `${pageDimensions.height}px` : undefined,
               }}
-            />
+            >
+              <canvas ref={canvasRef} className="block select-none" />
+              <div
+                ref={textLayerRef}
+                className="textLayer absolute inset-0 select-text"
+                style={{
+                  width: pageDimensions?.width ? `${pageDimensions.width}px` : undefined,
+                  height: pageDimensions?.height ? `${pageDimensions.height}px` : undefined,
+                  "--scale-factor": scale,
+                } as React.CSSProperties}
+              />
+              {/* Highlights visual overlay */}
+              <div className="absolute inset-0 pointer-events-none z-10">
+                {highlights.map((h) => {
+                  const rects = (h.rects as PdfHighlightRect[]) || [];
+                  const bgStyle =
+                    (h.type && highlightBgStyles[h.type]) ||
+                    "bg-amber-300/45 border-b border-amber-500/50";
+
+                  return (
+                    <React.Fragment key={h.id}>
+                      {rects.map((r, idx) => (
+                        <div
+                          key={`${h.id}-${idx}`}
+                          className={`absolute rounded-xs pointer-events-none transition-opacity mix-blend-multiply ${bgStyle}`}
+                          style={{
+                            left: `${r.x * 100}%`,
+                            top: `${r.y * 100}%`,
+                            width: `${r.width * 100}%`,
+                            height: `${r.height * 100}%`,
+                          }}
+                        />
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </main>
+
+        {/* Highlight creation and editing menu */}
+        <HighlightMenu
+          bookId={book.id}
+          selection={activeSelection}
+          onCustomSelectColor={handleSelectHighlightColor}
+          onCustomDelete={handleDeleteHighlight}
+          onClose={() => {
+            setActiveSelection(null);
+            setPendingHighlightData(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+        />
       </div>
 
       {/* Bottom Floating Quick Pagination on Mobile */}

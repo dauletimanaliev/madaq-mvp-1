@@ -269,8 +269,8 @@ export function Reader({
             setHighlights((current) => [
               ...current.filter(
                 (item) =>
-                  item.endPosition <= newHighlight.startPosition ||
-                  item.startPosition >= newHighlight.endPosition
+                  (item.endPosition ?? 0) <= (newHighlight.startPosition ?? 0) ||
+                  (item.startPosition ?? 0) >= (newHighlight.endPosition ?? 0)
               ),
               newHighlight,
             ]);

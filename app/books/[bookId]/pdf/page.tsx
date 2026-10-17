@@ -7,12 +7,16 @@ export const dynamic = "force-dynamic";
 
 export default async function BookPdfPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ bookId: string }>;
+  searchParams: Promise<{ page?: string }>;
 }) {
   const { bookId: rawBookId } = await params;
+  const { page: rawPage } = await searchParams;
   const bookId = decodeURIComponent(rawBookId);
   const book = await getBookById(bookId);
+  const initialPage = rawPage ? parseInt(rawPage, 10) : undefined;
 
   if (!book) {
     notFound();
@@ -76,5 +80,5 @@ export default async function BookPdfPage({
     );
   }
 
-  return <PdfReader book={book} pdfUrl={pdfUrl} />;
+  return <PdfReader book={book} pdfUrl={pdfUrl} initialPage={initialPage} />;
 }

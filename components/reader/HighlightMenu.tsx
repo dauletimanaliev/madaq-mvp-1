@@ -10,8 +10,8 @@ import { highlightTypes } from "@/lib/highlights/types";
 import type { Highlight, HighlightType } from "@/lib/types";
 
 export type SelectionRange = {
-  startPosition: number;
-  endPosition: number;
+  startPosition?: number;
+  endPosition?: number;
   rect: DOMRect;
   bottomRect?: DOMRect;
   existingHighlight?: Highlight | null;
@@ -57,19 +57,29 @@ export function HighlightMenu({
   onDeleted,
   onFailed,
   onClose,
+  onCustomSelectColor,
+  onCustomDelete,
 }: {
   bookId: string;
-  chapterId: string;
+  chapterId?: string;
   selection: SelectionRange | null;
-  onCreated: (highlight: Highlight) => void;
-  onUpdated: (highlight: Highlight) => void;
-  onDeleted: (highlightId: string) => void;
-  onFailed: (highlightId: string, message: string) => void;
+  onCreated?: (highlight: Highlight) => void;
+  onUpdated?: (highlight: Highlight) => void;
+  onDeleted?: (highlightId: string) => void;
+  onFailed?: (highlightId: string, message: string) => void;
   onClose: () => void;
+  onCustomSelectColor?: (type: HighlightType) => void;
+  onCustomDelete?: () => void;
 }) {
   const optimisticId = useRef(0);
 
-  if (!selection || selection.startPosition === selection.endPosition) {
+  if (
+    !selection ||
+    (!selection.existingHighlight &&
+      selection.startPosition !== undefined &&
+      selection.endPosition !== undefined &&
+      selection.startPosition === selection.endPosition)
+  ) {
     return null;
   }
 
@@ -77,6 +87,13 @@ export function HighlightMenu({
   const existing = selectedRange.existingHighlight;
 
   function selectColor(type: HighlightType) {
+    if (onCustomSelectColor) {
+      onCustomSelectColor(type);
+      return;
+    }
+
+    if (!chapterId || !onCreated || !onUpdated || !onFailed) return;
+
     const isExactUpdate =
       existing &&
       existing.startPosition === selectedRange.startPosition &&
@@ -106,8 +123,8 @@ export function HighlightMenu({
         id: `temp-${++optimisticId.current}`,
         bookId,
         chapterId,
-        startPosition: selectedRange.startPosition,
-        endPosition: selectedRange.endPosition,
+        startPosition: selectedRange.startPosition ?? 0,
+        endPosition: selectedRange.endPosition ?? 0,
         type,
         legacyColor: null,
         createdAt: new Date().toISOString(),
@@ -120,8 +137,8 @@ export function HighlightMenu({
           const result = await addHighlight({
             bookId,
             chapterId,
-            startPosition: selectedRange.startPosition,
-            endPosition: selectedRange.endPosition,
+            startPosition: selectedRange.startPosition ?? 0,
+            endPosition: selectedRange.endPosition ?? 0,
             type,
           });
 
@@ -136,7 +153,12 @@ export function HighlightMenu({
   }
 
   function handleDelete() {
-    if (!existing) return;
+    if (onCustomDelete) {
+      onCustomDelete();
+      return;
+    }
+
+    if (!existing || !onDeleted || !onFailed) return;
     const targetId = existing.id;
     onDeleted(targetId);
 

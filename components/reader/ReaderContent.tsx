@@ -242,7 +242,12 @@ export function ReaderContent({
 
     for (const color of Object.keys(highlightNames) as (keyof typeof highlightNames)[]) {
       const ranges = highlights
-        .filter((highlight) => highlight.type === color)
+        .filter(
+          (highlight): highlight is Highlight & { startPosition: number; endPosition: number } =>
+            highlight.type === color &&
+            highlight.startPosition != null &&
+            highlight.endPosition != null
+        )
         .map((highlight) =>
           canonicalOffsetsToDomRange(
             flow,
@@ -260,7 +265,13 @@ export function ReaderContent({
     }
 
     const legacyPinkRanges = highlights
-      .filter((highlight) => highlight.type === null && highlight.legacyColor === "pink")
+      .filter(
+        (highlight): highlight is Highlight & { startPosition: number; endPosition: number } =>
+          highlight.type === null &&
+          highlight.legacyColor === "pink" &&
+          highlight.startPosition != null &&
+          highlight.endPosition != null
+      )
       .map((highlight) =>
         canonicalOffsetsToDomRange(
           flow,
@@ -346,6 +357,8 @@ export function ReaderContent({
         const existingHighlight =
           highlights.find(
             (h) =>
+              h.startPosition != null &&
+              h.endPosition != null &&
               h.startPosition < positions.endPosition &&
               h.endPosition > positions.startPosition
           ) ?? null;
@@ -361,10 +374,14 @@ export function ReaderContent({
 
       const caretPosition = positions.startPosition;
       const matchingHighlight = highlights.find(
-        (h) => caretPosition >= h.startPosition && caretPosition < h.endPosition
+        (h) =>
+          h.startPosition != null &&
+          h.endPosition != null &&
+          caretPosition >= h.startPosition &&
+          caretPosition < h.endPosition
       );
 
-      if (matchingHighlight) {
+      if (matchingHighlight && matchingHighlight.startPosition != null && matchingHighlight.endPosition != null) {
         const highlightDomRange = canonicalOffsetsToDomRange(flow, {
           startPosition: matchingHighlight.startPosition,
           endPosition: matchingHighlight.endPosition,

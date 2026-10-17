@@ -55,13 +55,23 @@ export type HighlightType =
   | "vitamin"
   | "fiber";
 
+export type PdfHighlightRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type Highlight = {
   id: string;
   bookId: string;
-  chapterId: string;
-  startPosition: number;
-  endPosition: number;
+  chapterId?: string | null;
+  startPosition?: number | null;
+  endPosition?: number | null;
+  pageNumber?: number | null;
+  rects?: PdfHighlightRect[] | null;
+  selectedText?: string | null;
   type: HighlightType | null;
-  legacyColor: string | null;
+  legacyColor?: string | null;
   createdAt: string;
 };

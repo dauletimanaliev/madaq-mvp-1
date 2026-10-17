@@ -183,21 +183,25 @@ model Bookmark {
 // ──────────────────────────────
 model Highlight {
   id            String         @id @default(cuid())
-  startPosition Int            @map("start_position")
-  endPosition   Int            @map("end_position")
+  startPosition Int?           @default(0) @map("start_position")
+  endPosition   Int?           @default(0) @map("end_position")
+  pageNumber    Int?           @map("page_number")
+  rects         Json?
+  selectedText  String?        @map("selected_text")
   type          HighlightType?
   legacyColor   String?        @map("legacy_color")
   createdAt     DateTime       @default(now()) @map("created_at")
 
-  userId    String  @map("user_id")
-  user      User    @relation(fields: [userId], references: [id])
-  bookId    String  @map("book_id")
-  book      Book    @relation(fields: [bookId], references: [id])
-  chapterId String  @map("chapter_id")
-  chapter   Chapter @relation(fields: [chapterId], references: [id])
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  bookId    String   @map("book_id")
+  book      Book     @relation(fields: [bookId], references: [id])
+  chapterId String?  @map("chapter_id")
+  chapter   Chapter? @relation(fields: [chapterId], references: [id])
 
   @@unique([userId, chapterId, startPosition, endPosition])
   @@index([userId, chapterId])
+  @@index([userId, bookId, pageNumber])
   @@index([bookId])
   @@map("highlights")
 }

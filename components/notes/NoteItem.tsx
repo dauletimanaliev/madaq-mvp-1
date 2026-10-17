@@ -16,11 +16,19 @@ export function NoteItem({ note }: { note: HighlightNote }) {
             : "Не классифицировано — старое розовое выделение"}
         </span>
         <span>{note.bookTitle}</span>
-        <span>{note.chapterTitle ?? `Глава ${note.chapterNumber}`}</span>
+        <span>
+          {note.pageNumber
+            ? `Страница ${note.pageNumber}`
+            : (note.chapterTitle ?? `Глава ${note.chapterNumber ?? 1}`)}
+        </span>
       </div>
       <div className="mt-4 flex items-center gap-4 text-sm">
         <Link
-          href={`/books/${note.bookId}/read?chapter=${note.chapterNumber}`}
+          href={
+            note.pageNumber
+              ? `/books/${note.bookId}/pdf?page=${note.pageNumber}`
+              : `/books/${note.bookId}/read?chapter=${note.chapterNumber ?? 1}`
+          }
           className="font-medium text-accent hover:underline"
         >
           Открыть в книге

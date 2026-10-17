@@ -54,11 +54,13 @@ export async function addBookmark(
   }
 }
 
-export async function addHighlight(
-  input: Omit<Highlight, "id" | "createdAt" | "type" | "legacyColor"> & {
-    type: NonNullable<Highlight["type"]>;
-  }
-): Promise<
+export async function addHighlight(input: {
+  bookId: string;
+  chapterId: string;
+  startPosition: number;
+  endPosition: number;
+  type: NonNullable<Highlight["type"]>;
+}): Promise<
   | { ok: true; highlight: Highlight }
   | { ok: false; message: string }
 > {

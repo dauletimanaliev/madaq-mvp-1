@@ -7,27 +7,35 @@ type CreateHighlightInput = Omit<
   "id" | "createdAt" | "type" | "legacyColor"
 > & {
   type: HighlightType;
+  chapterId: string;
+  startPosition: number;
+  endPosition: number;
 };
 
 export type HighlightNote = Highlight & {
   selectedText: string;
   bookTitle: string;
-  chapterNumber: number;
-  chapterTitle: string | null;
+  chapterNumber?: number | null;
+  chapterTitle?: string | null;
+  pageNumber?: number | null;
 };
 
 function toHighlight(highlight: {
   id: string;
   bookId: string;
-  chapterId: string;
-  startPosition: number;
-  endPosition: number;
+  chapterId?: string | null;
+  startPosition?: number | null;
+  endPosition?: number | null;
+  pageNumber?: number | null;
+  rects?: unknown;
+  selectedText?: string | null;
   type: PrismaHighlightType | null;
-  legacyColor: string | null;
+  legacyColor?: string | null;
   createdAt: Date;
 }): Highlight {
   return {
     ...highlight,
+    rects: (highlight.rects as any) ?? null,
     type: highlight.type as HighlightType | null,
     createdAt: highlight.createdAt.toISOString(),
   };
@@ -58,22 +66,45 @@ export async function listUserHighlights(
     orderBy: { createdAt: "desc" },
   });
 
-  return highlights.map((highlight) => ({
-    ...toHighlight(highlight),
-    selectedText: highlight.chapter.content.slice(
-      highlight.startPosition,
-      highlight.endPosition
-    ),
-    bookTitle: highlight.book.title,
-    chapterNumber: highlight.chapter.number,
-    chapterTitle: highlight.chapter.title,
-  }));
+  return highlights.map((highlight) => {
+    const selectedText =
+      highlight.selectedText ||
+      (highlight.chapter && highlight.startPosition != null && highlight.endPosition != null
+        ? highlight.chapter.content.slice(
+            highlight.startPosition,
+            highlight.endPosition
+          )
+        : "");
+
+    return {
+      ...toHighlight(highlight),
+      selectedText,
+      bookTitle: highlight.book.title,
+      chapterNumber: highlight.chapter?.number ?? null,
+      chapterTitle: highlight.chapter?.title ?? null,
+      pageNumber: highlight.pageNumber ?? null,
+    };
+  });
 }
 
 export async function createHighlight(
   userId: string,
   input: CreateHighlightInput
 ): Promise<Highlight> {
+  // Проверка: есть ли книга в библиотеке пользователя
+  const userBook = await prisma.userLibrary.findUnique({
+    where: {
+      userId_bookId: {
+        userId,
+        bookId: input.bookId,
+      },
+    },
+  });
+
+  if (!userBook) {
+    throw new Error("Книга отсутствует в вашей библиотеке.");
+  }
+
   const chapter = await prisma.chapter.findFirst({
     where: { id: input.chapterId, bookId: input.bookId },
     select: { content: true },
@@ -144,4 +175,56 @@ export async function deleteHighlight(
   });
 
   return result.count > 0;
+}
+
+export async function listPdfHighlights(
+  userId: string,
+  bookId: string,
+  pageNumber: number
+): Promise<Highlight[]> {
+  const highlights = await prisma.highlight.findMany({
+    where: { userId, bookId, pageNumber },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return highlights.map(toHighlight);
+}
+
+export async function createPdfHighlight(
+  userId: string,
+  input: {
+    bookId: string;
+    pageNumber: number;
+    rects: any;
+    selectedText: string;
+    type: HighlightType;
+  }
+): Promise<Highlight> {
+  const userBook = await prisma.userLibrary.findUnique({
+    where: {
+      userId_bookId: {
+        userId,
+        bookId: input.bookId,
+      },
+    },
+  });
+
+  if (!userBook) {
+    throw new Error("Книга отсутствует в вашей библиотеке.");
+  }
+
+  const highlight = await prisma.highlight.create({
+    data: {
+      userId,
+      bookId: input.bookId,
+      pageNumber: input.pageNumber,
+      rects: input.rects,
+      selectedText: input.selectedText,
+      type: input.type,
+      startPosition: 0,
+      endPosition: 0,
+    },
+  });
+
+  return toHighlight(highlight);
 }
