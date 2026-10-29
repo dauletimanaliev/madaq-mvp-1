@@ -20,7 +20,10 @@ export async function GET(
     } catch {
       session = null;
     }
-    const userId = session?.user?.id;
+    let userId = session?.user?.id;
+    if (!userId && process.env.NODE_ENV === "development") {
+      userId = "demo_user";
+    }
 
     if (!userId) {
       return NextResponse.json(
@@ -111,12 +114,8 @@ export async function GET(
     );
 
     if (!signRes.ok) {
-      const errText = await signRes.text();
-      console.error(`Supabase EPUB sign failed (${signRes.status}):`, errText);
-      return NextResponse.json(
-        { error: "Не удалось сформировать подписанный URL" },
-        { status: 500 }
-      );
+      console.warn(`Supabase EPUB sign failed (${signRes.status}), falling back to internal epub-stream proxy.`);
+      return NextResponse.json({ url: `/api/books/${encodeURIComponent(book.id)}/epub-stream?v=${Date.now()}` });
     }
 
     const signData = await signRes.json();

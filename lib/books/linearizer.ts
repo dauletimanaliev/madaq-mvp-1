@@ -40,7 +40,8 @@ export async function linearizePdf(inputBuffer: Buffer): Promise<LinearizeResult
       buffer: outputBuffer,
       isLinearized: true,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errMessage = err instanceof Error ? err.message : String(err);
     // qpdf exit code 3 means warnings occurred, but valid output may have been created
     try {
       const outputBuffer = await fs.readFile(outputPath);
@@ -50,11 +51,11 @@ export async function linearizePdf(inputBuffer: Buffer): Promise<LinearizeResult
       }
     } catch {}
 
-    console.warn("qpdf linearization fallback (keeping original):", err.message);
+    console.warn("qpdf linearization fallback (keeping original):", errMessage);
     return {
       buffer: inputBuffer,
       isLinearized: false,
-      error: err.message,
+      error: errMessage,
     };
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useTransition } from "react";
+import React, { useState, useEffect } from "react";
 import type { Book } from "@/lib/types";
 import { BookCard } from "./BookCard";
 
@@ -10,41 +10,38 @@ export function BookListWithSearch({
   initialBooks: Book[];
 }) {
   const [query, setQuery] = useState("");
-  const [books, setBooks] = useState<Book[]>(initialBooks);
-  const [isPending, startTransition] = useTransition();
-  const [isSearching, setIsSearching] = useState(false);
+  // Results for the last query that finished loading. The visible list and
+  // the spinner are derived from it, so no state is reset inside effects.
+  const [searchState, setSearchState] = useState<{
+    query: string;
+    books: Book[];
+  } | null>(null);
+
+  const trimmed = query.trim();
+  const isSearching = trimmed !== "" && searchState?.query !== trimmed;
+  const books = trimmed ? (searchState?.books ?? initialBooks) : initialBooks;
 
   useEffect(() => {
-    setBooks(initialBooks);
-  }, [initialBooks]);
+    if (!trimmed) return;
 
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      setBooks(initialBooks);
-      setIsSearching(false);
-      return;
-    }
-
-    setIsSearching(true);
     const handler = setTimeout(async () => {
       try {
         const res = await fetch(`/api/books/search?q=${encodeURIComponent(trimmed)}`);
-        if (res.ok) {
-          const data = await res.json();
-          startTransition(() => {
-            setBooks(data.books || []);
-            setIsSearching(false);
-          });
-        }
+        if (!res.ok) throw new Error(`Search failed with status ${res.status}`);
+        const data = await res.json();
+        setSearchState({ query: trimmed, books: data.books || [] });
       } catch (err) {
         console.error("Search failed:", err);
-        setIsSearching(false);
+        // Keep the previous list but stop the spinner.
+        setSearchState((prev) => ({
+          query: trimmed,
+          books: prev?.books ?? initialBooks,
+        }));
       }
     }, 200);
 
     return () => clearTimeout(handler);
-  }, [query, initialBooks]);
+  }, [trimmed, initialBooks]);
 
   return (
     <div className="mt-8 flex flex-col gap-6">

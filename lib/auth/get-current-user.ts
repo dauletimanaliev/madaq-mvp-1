@@ -11,6 +11,9 @@ export async function getCurrentUserId(): Promise<string> {
   const session = await auth();
 
   if (!session?.user?.id) {
+    if (process.env.NODE_ENV === "development") {
+      return "demo_user";
+    }
     redirect("/login");
   }
 

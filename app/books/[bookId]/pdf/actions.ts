@@ -27,24 +27,26 @@ export async function savePdfHighlight(input: {
   pageNumber: number;
   rects: PdfHighlightRect[];
   selectedText: string;
-  type: HighlightType;
+  type: HighlightType | null;
 }): Promise<{ ok: true; highlight: Highlight } | { ok: false; message: string }> {
   try {
     const userId = await getCurrentUserId();
     const highlight = await createPdfHighlight(userId, input);
     return { ok: true, highlight };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Unable to save PDF highlight:", error);
     return {
       ok: false,
-      message: error?.message || "Не удалось сохранить выделение.",
+      message:
+        (error instanceof Error && error.message) ||
+        "Не удалось сохранить выделение.",
     };
   }
 }
 
 export async function updatePdfHighlightCategory(
   highlightId: string,
-  type: HighlightType
+  type: HighlightType | null
 ): Promise<{ ok: true; highlight: Highlight } | { ok: false; message: string }> {
   try {
     const userId = await getCurrentUserId();
@@ -53,7 +55,7 @@ export async function updatePdfHighlightCategory(
       return { ok: false, message: "Выделение не найдено." };
     }
     return { ok: true, highlight: updated };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Unable to update PDF highlight category:", error);
     return {
       ok: false,

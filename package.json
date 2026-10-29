@@ -10,7 +10,8 @@
     "lint": "eslint",
     "db:cleanup-demo-book": "node prisma/scripts/delete-demo-book.mjs",
     "storage:upload-new-cafe-guest-cover": "node prisma/scripts/upload-new-cafe-guest-cover.mjs",
-    "import:book": "node scripts/import-book.mjs"
+    "import:book": "node scripts/import-book.mjs",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.9",

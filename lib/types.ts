@@ -73,5 +73,11 @@ export type Highlight = {
   selectedText?: string | null;
   type: HighlightType | null;
   legacyColor?: string | null;
+  cfi?: string | null;
+  sectionHref?: string | null;
+  sectionIndex?: number | null;
+  textQuotePrefix?: string | null;
+  textQuoteSuffix?: string | null;
+  note?: string | null;
   createdAt: string;
 };

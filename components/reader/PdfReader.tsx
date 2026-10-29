@@ -10,6 +10,7 @@ import {
   updatePdfHighlightCategory,
   removePdfHighlight,
 } from "@/app/books/[bookId]/pdf/actions";
+import type { PDFDocumentProxy, RenderTask, TextLayer } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
 
 interface PdfReaderProps {
@@ -113,8 +114,16 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
   // In-book search state (ТЗ §4)
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState<boolean>(false);
+  // Results for the last query that finished loading; the spinner and the
+  // visible list are derived from it instead of being reset inside effects.
+  const [searchState, setSearchState] = useState<{
+    query: string;
+    results: SearchResult[];
+  }>({ query: "", results: [] });
+  const trimmedSearchQuery = searchQuery.trim();
+  const isSearchActive = trimmedSearchQuery.length >= 2;
+  const isSearching = isSearchActive && searchState.query !== trimmedSearchQuery;
+  const searchResults = isSearchActive ? searchState.results : [];
 
   // Highlights and TextLayer state
   const [highlights, setHighlights] = useState<Highlight[]>([]);
@@ -123,6 +132,13 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
     rects: PdfHighlightRect[];
     selectedText: string;
   } | null>(null);
+  // Drop any open selection when the page changes (adjusting state during render).
+  const [selectionPage, setSelectionPage] = useState(currentPage);
+  if (selectionPage !== currentPage) {
+    setSelectionPage(currentPage);
+    setActiveSelection(null);
+    setPendingHighlightData(null);
+  }
   const [pageDimensions, setPageDimensions] = useState<{
     width: number;
     height: number;
@@ -131,10 +147,10 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
-  const pdfDocRef = useRef<any>(null);
-  const pdfjsLibRef = useRef<any>(null);
-  const renderTaskRef = useRef<any>(null);
-  const textLayerTaskRef = useRef<any>(null);
+  const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
+  const pdfjsLibRef = useRef<typeof import("pdfjs-dist") | null>(null);
+  const renderTaskRef = useRef<RenderTask | null>(null);
+  const textLayerTaskRef = useRef<TextLayer | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
 
@@ -268,11 +284,11 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
         setNumPages(pdfDoc.numPages);
         setLoadingProgress(100);
         setIsLoading(false);
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!isCancelled) {
           console.error("PDF progressive load error:", err);
           setError(
-            err.message ||
+            (err instanceof Error && err.message) ||
               "Не удалось загрузить PDF документ. Проверьте подключение к сети."
           );
           setIsLoading(false);
@@ -348,14 +364,14 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
               textLayerTaskRef.current = textLayer;
               await textLayer.render();
             }
-          } catch (textErr: any) {
-            if (textErr?.name !== "RenderingCancelledException") {
+          } catch (textErr: unknown) {
+            if ((textErr as Error | null)?.name !== "RenderingCancelledException") {
               console.warn("Text layer render error / scanned page:", textErr);
             }
           }
         }
-      } catch (err: any) {
-        if (err?.name !== "RenderingCancelledException") {
+      } catch (err: unknown) {
+        if ((err as Error | null)?.name !== "RenderingCancelledException") {
           console.warn("PDF page render warning:", err);
         }
       }
@@ -377,8 +393,6 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
       }
     }
     loadHighlights();
-    setActiveSelection(null);
-    setPendingHighlightData(null);
     return () => {
       active = false;
     };
@@ -542,32 +556,28 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
 
   // 6. In-book Content Search (Debounced, pg_trgm powered)
   useEffect(() => {
-    const trimmed = searchQuery.trim();
-    if (!trimmed || trimmed.length < 2) {
-      setSearchResults([]);
-      setIsSearching(false);
-      return;
-    }
+    if (!isSearchActive) return;
+    const query = trimmedSearchQuery;
 
-    setIsSearching(true);
     const handler = setTimeout(async () => {
+      let results: SearchResult[] = [];
       try {
         const res = await fetch(
-          `/api/books/${book.id}/search-content?q=${encodeURIComponent(trimmed)}`
+          `/api/books/${book.id}/search-content?q=${encodeURIComponent(query)}`
         );
         if (res.ok) {
           const data = await res.json();
-          setSearchResults(data.results || []);
+          results = data.results || [];
         }
       } catch (err) {
         console.error("In-book search error:", err);
       } finally {
-        setIsSearching(false);
+        setSearchState({ query, results });
       }
     }, 250);
 
     return () => clearTimeout(handler);
-  }, [searchQuery, book.id]);
+  }, [isSearchActive, trimmedSearchQuery, book.id]);
 
   // 7. Touch / Swipe Event Handlers for Mobile & Tablets (ТЗ §3)
   const handleTouchStart = (e: React.TouchEvent) => {

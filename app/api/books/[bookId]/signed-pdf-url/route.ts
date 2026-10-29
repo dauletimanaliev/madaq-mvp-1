@@ -39,7 +39,7 @@ export async function GET(
     }
 
     // Extract bucket and storage path (e.g. book-pdfs/books/xyz.pdf)
-    let bucket = "book-pdfs";
+    const bucket = "book-pdfs";
     let objectPath = book.storageS3Key;
     if (book.storageS3Key.startsWith("book-pdfs/")) {
       objectPath = book.storageS3Key.replace(/^book-pdfs\//, "");

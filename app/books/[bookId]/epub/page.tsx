@@ -8,11 +8,16 @@ export const dynamic = "force-dynamic";
 
 export default async function BookEpubPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ bookId: string }>;
+  searchParams?: Promise<{ w?: string; mobile?: string; theme?: string }>;
 }) {
   const userId = await getCurrentUserId();
   const { bookId: rawBookId } = await params;
+  const sp = searchParams ? await searchParams : {};
+  const isMobile = process.env.NODE_ENV !== "production" && (sp.w === "390" || sp.mobile === "1");
+  const initialTheme = (sp.theme === "paper" || sp.theme === "sepia" || sp.theme === "dark") ? sp.theme : undefined;
   const bookId = decodeURIComponent(rawBookId);
 
   const book = await prisma.book.findFirst({
@@ -49,5 +54,5 @@ export default async function BookEpubPage({
     notFound();
   }
 
-  return <EpubReaderShell bookId={book.id} title={book.title} />;
+  return <EpubReaderShell bookId={book.id} title={book.title} isMobile={isMobile} initialTheme={initialTheme} />;
 }

@@ -43,3 +43,6 @@ next-env.d.ts
 
 # backups
 /backup/
+
+# local EPUB storage (dev fallback for epub-stream; regenerate via scripts/generate_test_epubs.py)
+/storage/

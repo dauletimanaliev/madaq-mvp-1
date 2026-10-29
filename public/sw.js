@@ -34,11 +34,15 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // Do not intercept non-GET or stream/API requests
+  // Do not intercept non-GET, stream/API, or Next.js RSC requests
   if (
     event.request.method !== "GET" ||
     url.pathname.includes("/api/") ||
     url.pathname.includes("/pdf-stream") ||
+    url.pathname.includes("/epub-stream") ||
+    url.searchParams.has("_rsc") ||
+    event.request.headers.has("RSC") ||
+    event.request.headers.has("Next-Router-State-Tree") ||
     event.request.headers.has("range")
   ) {
     return;

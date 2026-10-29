@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { NoteItem } from "@/components/notes/NoteItem";
 import { NotesOnboarding } from "@/components/notes/NotesOnboarding";
-import { highlightTypes, isHighlightType } from "@/lib/highlights/types";
+import { highlightTypes, isHighlightFilter, uncategorizedHighlight } from "@/lib/highlights/types";
 import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { listUserHighlights } from "@/server/highlights/queries";
 
@@ -14,7 +14,7 @@ export default async function NotesPage({
 }) {
   const { type: typeParam } = await searchParams;
   const userId = await getCurrentUserId();
-  const selectedType = isHighlightType(typeParam) ? typeParam : undefined;
+  const selectedType = isHighlightFilter(typeParam) ? typeParam : undefined;
   const notes = await listUserHighlights(userId, selectedType);
 
   return (
@@ -33,10 +33,20 @@ export default async function NotesPage({
         <Link
           href="/notes"
           className={`rounded-full border px-3 py-1.5 text-sm ${
-            !selectedType ? "border-accent bg-accent-soft text-ink" : "border-border text-ink-muted"
+            !selectedType ? "border-accent bg-accent-soft text-ink font-medium" : "border-border text-ink-muted hover:text-ink"
           }`}
         >
           Все
+        </Link>
+        <Link
+          href="/notes?type=none"
+          className={`rounded-full border px-3 py-1.5 text-sm ${
+            selectedType === "none"
+              ? "border-accent bg-accent-soft text-ink font-medium"
+              : "border-border text-ink-muted hover:text-ink"
+          }`}
+        >
+          {uncategorizedHighlight.name}
         </Link>
         {highlightTypes.map((item) => (
           <Link
@@ -44,8 +54,8 @@ export default async function NotesPage({
             href={`/notes?type=${item.type}`}
             className={`rounded-full border px-3 py-1.5 text-sm ${
               selectedType === item.type
-                ? "border-accent bg-accent-soft text-ink"
-                : "border-border text-ink-muted"
+                ? "border-accent bg-accent-soft text-ink font-medium"
+                : "border-border text-ink-muted hover:text-ink"
             }`}
           >
             {item.name}

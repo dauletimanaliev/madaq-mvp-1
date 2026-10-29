@@ -26,11 +26,6 @@ export default async function BookPdfPage({
     redirect(`/books/${book.id}/epub`);
   }
 
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
-
   const pdfUrl = book.storageS3Key
     ? `/api/books/${encodeURIComponent(book.id)}/pdf-stream`
     : null;

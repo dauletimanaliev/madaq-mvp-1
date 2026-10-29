@@ -190,6 +190,15 @@ model Highlight {
   selectedText  String?        @map("selected_text")
   type          HighlightType?
   legacyColor   String?        @map("legacy_color")
+  
+  // EPUB якоря
+  cfi             String?
+  sectionHref     String?        @map("section_href")
+  sectionIndex    Int?           @map("section_index")
+  textQuotePrefix String?        @map("text_quote_prefix")
+  textQuoteSuffix String?        @map("text_quote_suffix")
+  note            String?
+
   createdAt     DateTime       @default(now()) @map("created_at")
 
   userId    String   @map("user_id")
@@ -200,8 +209,10 @@ model Highlight {
   chapter   Chapter? @relation(fields: [chapterId], references: [id])
 
   @@unique([userId, chapterId, startPosition, endPosition])
+  @@unique([userId, bookId, cfi])
   @@index([userId, chapterId])
   @@index([userId, bookId, pageNumber])
+  @@index([userId, bookId, sectionIndex])
   @@index([bookId])
   @@map("highlights")
 }

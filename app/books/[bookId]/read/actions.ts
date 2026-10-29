@@ -59,7 +59,7 @@ export async function addHighlight(input: {
   chapterId: string;
   startPosition: number;
   endPosition: number;
-  type: NonNullable<Highlight["type"]>;
+  type: HighlightType | null;
 }): Promise<
   | { ok: true; highlight: Highlight }
   | { ok: false; message: string }
@@ -78,7 +78,7 @@ export async function addHighlight(input: {
 
 export async function updateHighlightColor(
   highlightId: string,
-  type: HighlightType
+  type: HighlightType | null
 ): Promise<
   | { ok: true; highlight: Highlight }
   | { ok: false; message: string }

@@ -50,10 +50,25 @@ export const highlightTypes: {
   },
 ];
 
+export const uncategorizedHighlight = {
+  type: null,
+  name: "Без категории",
+  shortLabel: "—",
+  colorName: "Серый",
+  description: "Быстрое выделение, можно классифицировать позже.",
+  menuClassName: "bg-stone-200 text-stone-900 hover:bg-stone-300",
+} as const;
+
 export const highlightTypeByName = Object.fromEntries(
   highlightTypes.map((item) => [item.type, item])
 ) as Record<HighlightType, (typeof highlightTypes)[number]>;
 
 export function isHighlightType(value: string | undefined): value is HighlightType {
   return highlightTypes.some((item) => item.type === value);
+}
+
+export function isHighlightFilter(
+  value: string | undefined
+): value is HighlightType | "none" {
+  return value === "none" || highlightTypes.some((item) => item.type === value);
 }

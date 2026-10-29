@@ -1,12 +1,13 @@
-import { HighlightType as PrismaHighlightType } from "@prisma/client";
+import crypto from "crypto";
+import { Prisma, HighlightType as PrismaHighlightType } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import type { Highlight, HighlightType } from "@/lib/types";
+import type { Highlight, HighlightType, PdfHighlightRect } from "@/lib/types";
 
 type CreateHighlightInput = Omit<
   Highlight,
   "id" | "createdAt" | "type" | "legacyColor"
 > & {
-  type: HighlightType;
+  type: HighlightType | null;
   chapterId: string;
   startPosition: number;
   endPosition: number;
@@ -31,11 +32,17 @@ function toHighlight(highlight: {
   selectedText?: string | null;
   type: PrismaHighlightType | null;
   legacyColor?: string | null;
+  cfi?: string | null;
+  sectionHref?: string | null;
+  sectionIndex?: number | null;
+  textQuotePrefix?: string | null;
+  textQuoteSuffix?: string | null;
+  note?: string | null;
   createdAt: Date;
 }): Highlight {
   return {
     ...highlight,
-    rects: (highlight.rects as any) ?? null,
+    rects: (highlight.rects as Prisma.JsonValue as PdfHighlightRect[] | null) ?? null,
     type: highlight.type as HighlightType | null,
     createdAt: highlight.createdAt.toISOString(),
   };
@@ -55,10 +62,17 @@ export async function listHighlights(
 
 export async function listUserHighlights(
   userId: string,
-  type?: HighlightType
+  type?: HighlightType | "none"
 ): Promise<HighlightNote[]> {
+  const whereClause: Prisma.HighlightWhereInput = { userId };
+  if (type === "none") {
+    whereClause.type = null;
+  } else if (type) {
+    whereClause.type = type;
+  }
+
   const highlights = await prisma.highlight.findMany({
-    where: { userId, ...(type ? { type } : {}) },
+    where: whereClause,
     include: {
       book: { select: { title: true } },
       chapter: { select: { number: true, title: true, content: true } },
@@ -150,7 +164,8 @@ export async function createHighlight(
 export async function updateHighlightType(
   userId: string,
   highlightId: string,
-  type: HighlightType
+  type: HighlightType | null,
+  note?: string | null
 ): Promise<Highlight | null> {
   const existing = await prisma.highlight.findFirst({
     where: { id: highlightId, userId },
@@ -158,9 +173,14 @@ export async function updateHighlightType(
 
   if (!existing) return null;
 
+  const data: Prisma.HighlightUpdateInput = { type, legacyColor: null };
+  if (note !== undefined) {
+    data.note = note;
+  }
+
   const updated = await prisma.highlight.update({
     where: { id: highlightId },
-    data: { type, legacyColor: null },
+    data,
   });
 
   return toHighlight(updated);
@@ -175,6 +195,118 @@ export async function deleteHighlight(
   });
 
   return result.count > 0;
+}
+
+export async function listEpubHighlights(
+  userId: string,
+  bookId: string
+): Promise<Highlight[]> {
+  const highlights = await prisma.highlight.findMany({
+    where: { userId, bookId, cfi: { not: null } },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return highlights.map(toHighlight);
+}
+
+export async function createEpubHighlight(
+  userId: string,
+  input: {
+    bookId: string;
+    cfi: string;
+    sectionHref?: string | null;
+    sectionIndex?: number | null;
+    selectedText: string;
+    textQuotePrefix?: string | null;
+    textQuoteSuffix?: string | null;
+    type?: HighlightType | null;
+    note?: string | null;
+  }
+): Promise<Highlight> {
+  const tQueryStart = performance.now();
+  const highlightId = "cl" + crypto.randomBytes(11).toString("hex");
+
+  const rows = await prisma.$queryRaw<
+    Array<{
+      id: string;
+      userId: string;
+      bookId: string;
+      chapterId: string | null;
+      startPosition: number | null;
+      endPosition: number | null;
+      pageNumber: number | null;
+      rects: unknown;
+      selectedText: string;
+      type: string | null;
+      legacyColor: string | null;
+      cfi: string | null;
+      sectionHref: string | null;
+      sectionIndex: number | null;
+      textQuotePrefix: string | null;
+      textQuoteSuffix: string | null;
+      note: string | null;
+      createdAt: Date;
+    }>
+  >`
+    WITH verified_library AS (
+      SELECT 1 FROM "public"."user_library" WHERE "user_id" = ${userId} AND "book_id" = ${input.bookId}
+    )
+    INSERT INTO "public"."highlights" (
+      "id", "user_id", "book_id", "cfi", "section_href", "section_index",
+      "selected_text", "text_quote_prefix", "text_quote_suffix",
+      "type", "note", "start_position", "end_position", "created_at"
+    )
+    SELECT
+      ${highlightId}, ${userId}, ${input.bookId}, ${input.cfi}, ${input.sectionHref ?? null}, ${input.sectionIndex ?? null},
+      ${input.selectedText}, ${input.textQuotePrefix ?? null}, ${input.textQuoteSuffix ?? null},
+      CAST(${input.type ?? null} AS "public"."HighlightType"), ${input.note ?? null}, 0, 0, NOW()
+    FROM verified_library
+    ON CONFLICT ("user_id", "book_id", "cfi")
+    DO UPDATE SET
+      "type" = EXCLUDED."type",
+      "note" = COALESCE(EXCLUDED."note", "public"."highlights"."note"),
+      "selected_text" = COALESCE(EXCLUDED."selected_text", "public"."highlights"."selected_text")
+    RETURNING
+      "id", "user_id" AS "userId", "book_id" AS "bookId", "chapter_id" AS "chapterId",
+      "start_position" AS "startPosition", "end_position" AS "endPosition",
+      "page_number" AS "pageNumber", "rects", "selected_text" AS "selectedText",
+      "type"::text AS "type", "legacy_color" AS "legacyColor", "cfi",
+      "section_href" AS "sectionHref", "section_index" AS "sectionIndex",
+      "text_quote_prefix" AS "textQuotePrefix", "text_quote_suffix" AS "textQuoteSuffix",
+      "note", "created_at" AS "createdAt";
+  `;
+
+  const tQuery = performance.now() - tQueryStart;
+
+  if (!rows || rows.length === 0) {
+    throw new Error("Книга отсутствует в вашей библиотеке.");
+  }
+
+  console.log(`📊 [createEpubHighlight (Single Atomic Query)] Time: ${tQuery.toFixed(1)}ms`);
+  const row = rows[0];
+  return toHighlight({
+    ...row,
+    type: row.type as PrismaHighlightType | null,
+  });
+}
+
+export async function updateEpubHighlightCfi(
+  userId: string,
+  highlightId: string,
+  cfi: string
+): Promise<Highlight | null> {
+  const existing = await prisma.highlight.findFirst({
+    where: { id: highlightId, userId },
+  });
+
+  if (!existing) return null;
+
+  const updated = await prisma.highlight.update({
+    where: { id: highlightId },
+    data: { cfi },
+  });
+
+  return toHighlight(updated);
 }
 
 export async function listPdfHighlights(
@@ -195,9 +327,9 @@ export async function createPdfHighlight(
   input: {
     bookId: string;
     pageNumber: number;
-    rects: any;
+    rects: Prisma.InputJsonValue;
     selectedText: string;
-    type: HighlightType;
+    type?: HighlightType | null;
   }
 ): Promise<Highlight> {
   const userBook = await prisma.userLibrary.findUnique({
