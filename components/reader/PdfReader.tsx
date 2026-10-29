@@ -1,21 +1,32 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { Book, Highlight, HighlightType, PdfHighlightRect } from "@/lib/types";
 import { HighlightMenu, type SelectionRange } from "./HighlightMenu";
+import { PdfPage } from "./PdfPage";
 import {
-  fetchPdfPageHighlights,
+  fetchPdfBookHighlights,
   savePdfHighlight,
   updatePdfHighlightCategory,
   removePdfHighlight,
 } from "@/app/books/[bookId]/pdf/actions";
-import type { PDFDocumentProxy, RenderTask, TextLayer } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
 
 interface PdfReaderProps {
   book: Book;
+  /** Signed storage URL (preferred) or the streaming proxy. */
   pdfUrl: string;
+  /** Streaming proxy, used if loading from `pdfUrl` fails. */
+  fallbackUrl?: string;
   initialPage?: number;
 }
 
@@ -24,13 +35,17 @@ interface SearchResult {
   snippet: string;
 }
 
-const highlightBgStyles: Record<HighlightType, string> = {
-  protein: "bg-red-400/40 border-b border-red-500/50",
-  carbohydrate: "bg-orange-400/40 border-b border-orange-500/50",
-  fat: "bg-amber-300/45 border-b border-amber-500/50",
-  vitamin: "bg-emerald-400/40 border-b border-emerald-500/50",
-  fiber: "bg-sky-400/40 border-b border-sky-500/50",
+type LoadedDoc = {
+  pdfDoc: PDFDocumentProxy;
+  pdfjs: typeof import("pdfjs-dist");
 };
+
+const PAGE_GAP = 12; // px between pages
+const TOP_PADDING = 64; // keeps the first page clear of the header
+const MAX_FIT_WIDTH = 960; // page width at 100% on wide screens
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 3;
+const EMPTY_HIGHLIGHTS: Highlight[] = [];
 
 function normalizeAndMergeRects(
   clientRects: DOMRect[],
@@ -96,24 +111,163 @@ function normalizeAndMergeRects(
   return merged;
 }
 
-export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
+const RANGE_CHUNK_SIZE = 524288; // 512 KB: storage is far away, fewer round trips
+const CMAP_URL = "https://unpkg.com/pdfjs-dist@4.4.168/cmaps/";
+
+type PdfJs = typeof import("pdfjs-dist");
+
+const PREFETCH_MAX_BYTES = 25 * 1024 * 1024; // fetch small books fully in the background
+const PREFETCH_CONCURRENCY = 4;
+
+/**
+ * Opens a cross-origin PDF by fetching byte ranges ourselves.
+ *
+ * Supabase Storage answers Range requests, but does not expose the
+ * `Accept-Ranges` header over CORS, so PDF.js on its own believes ranges are
+ * unsupported and downloads the whole file before showing anything. With a
+ * PDFDataRangeTransport we fetch fixed-size chunks, keep them in memory and
+ * answer each PDF.js range request from them.
+ *
+ * Books up to PREFETCH_MAX_BYTES are downloaded in parallel right away: PDF.js
+ * asks for chunks one after another (often most of the file before the first
+ * page, for embedded fonts and images), so waiting for each request costs a
+ * round trip per chunk. Chunks PDF.js asks for jump the queue.
+ * Returns null when the server ignores Range.
+ */
+async function openPdfByRanges(
+  pdfjs: PdfJs,
+  url: string,
+  knownLength: number | null | undefined,
+  signal: AbortSignal
+) {
+  const fetchRange = (begin: number, end: number) =>
+    fetch(url, { headers: { Range: `bytes=${begin}-${end - 1}` }, signal }).then((r) => {
+      if (r.status !== 206) throw new Error(`Range request failed: ${r.status}`);
+      return r.arrayBuffer().then((buf) => new Uint8Array(buf));
+    });
+
+  const lengthPromise = knownLength
+    ? Promise.resolve(knownLength)
+    : fetch(url, { method: "HEAD", signal }).then((r) =>
+        Number(r.headers.get("content-length")) || 0
+      );
+  const firstChunkPromise = fetchRange(0, RANGE_CHUNK_SIZE).catch(() => null);
+
+  const length = await lengthPromise;
+  const chunkCount = Math.ceil(length / RANGE_CHUNK_SIZE);
+  const chunks = new Map<number, Promise<Uint8Array>>();
+
+  const getChunk = (index: number): Promise<Uint8Array> => {
+    const existing = chunks.get(index);
+    if (existing) return existing;
+    const begin = index * RANGE_CHUNK_SIZE;
+    const end = Math.min(length, begin + RANGE_CHUNK_SIZE);
+    // One retry for flaky mobile networks.
+    const promise = fetchRange(begin, end).catch(() => fetchRange(begin, end));
+    promise.catch(() => chunks.delete(index));
+    chunks.set(index, promise);
+    return promise;
+  };
+
+  // The cross-reference table sits at the end of the file and is needed
+  // right after the header, so fetch it alongside the first chunk.
+  if (chunkCount > 1) void getChunk(chunkCount - 1).catch(() => {});
+
+  const initialData = await firstChunkPromise;
+  if (!length || !initialData) return null;
+  chunks.set(0, Promise.resolve(initialData));
+
+  const transport = new pdfjs.PDFDataRangeTransport(length, initialData);
+  // PDF.js accepts data only for a range it asked for, delivered in one piece.
+  transport.requestDataRange = (begin: number, end: number) => {
+    const first = Math.floor(begin / RANGE_CHUNK_SIZE);
+    const last = Math.ceil(end / RANGE_CHUNK_SIZE) - 1;
+    const parts: Promise<Uint8Array>[] = [];
+    for (let i = first; i <= last; i++) parts.push(getChunk(i));
+    Promise.all(parts)
+      .then((loaded) => {
+        const joined = new Uint8Array(loaded.reduce((n, c) => n + c.length, 0));
+        let offset = 0;
+        for (const c of loaded) {
+          joined.set(c, offset);
+          offset += c.length;
+        }
+        const from = begin - first * RANGE_CHUNK_SIZE;
+        transport.onDataRange(begin, joined.subarray(from, from + (end - begin)));
+      })
+      .catch((err) => {
+        if (!signal.aborted) console.warn("PDF range load failed:", err);
+      });
+  };
+
+  if (length <= PREFETCH_MAX_BYTES) {
+    const queue = Array.from({ length: chunkCount }, (_, i) => i).filter((i) => !chunks.has(i));
+    const worker = async () => {
+      while (queue.length > 0 && !signal.aborted) {
+        await getChunk(queue.shift() as number).catch(() => {});
+      }
+    };
+    for (let i = 0; i < PREFETCH_CONCURRENCY; i++) void worker();
+  }
+
+  const loadingTask = pdfjs.getDocument({
+    range: transport,
+    rangeChunkSize: RANGE_CHUNK_SIZE,
+    disableAutoFetch: true,
+    cMapUrl: CMAP_URL,
+    cMapPacked: true,
+  });
+  return loadingTask;
+}
+
+/** Index of the last page element whose top is at or above `y` (binary search). */
+function pageIndexAt(pages: HTMLCollection, y: number): number {
+  let lo = 0;
+  let hi = pages.length - 1;
+  let found = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const el = pages[mid] as HTMLElement;
+    if (el.offsetTop <= y) {
+      found = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return found;
+}
+
+function pageElementFromNode(node: Node | null): HTMLElement | null {
+  const el = node instanceof Element ? node : node?.parentElement;
+  return (el?.closest("[data-pdf-page]") as HTMLElement | null) ?? null;
+}
+
+export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderProps) {
+  const [doc, setDoc] = useState<LoadedDoc | null>(null);
   const [numPages, setNumPages] = useState<number>(book.totalPages || 0);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [activePdfUrl, setActivePdfUrl] = useState<string>(pdfUrl);
+
+  // Layout
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [defaultRatio, setDefaultRatio] = useState(1.414);
+  const [pageRatios, setPageRatios] = useState<Record<number, number>>({});
+  const [visibleRange, setVisibleRange] = useState({ first: 1, last: 1 });
   const [currentPage, setCurrentPage] = useState<number>(
     initialPage && initialPage >= 1 ? initialPage : 1
   );
-  const [scale, setScale] = useState<number>(1.2);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [loadingProgress, setLoadingProgress] = useState<number>(0);
-  const [error, setError] = useState<string | null>(null);
-  const [pageInput, setPageInput] = useState<string>(
-    String(initialPage && initialPage >= 1 ? initialPage : 1)
-  );
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [activePdfUrl, setActivePdfUrl] = useState<string>(pdfUrl);
 
-  // In-book search state (ТЗ §4)
-  const [searchOpen, setSearchOpen] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>("");
+  // Chrome
+  const [chromeVisible, setChromeVisible] = useState(true);
+  const [pageDraft, setPageDraft] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Search
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   // Results for the last query that finished loading; the spinner and the
   // visible list are derived from it instead of being reset inside effects.
   const [searchState, setSearchState] = useState<{
@@ -125,383 +279,370 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
   const isSearching = isSearchActive && searchState.query !== trimmedSearchQuery;
   const searchResults = isSearchActive ? searchState.results : [];
 
-  // Highlights and TextLayer state
+  // Highlights
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [activeSelection, setActiveSelection] = useState<SelectionRange | null>(null);
   const [pendingHighlightData, setPendingHighlightData] = useState<{
+    pageNumber: number;
     rects: PdfHighlightRect[];
     selectedText: string;
   } | null>(null);
-  // Drop any open selection when the page changes (adjusting state during render).
-  const [selectionPage, setSelectionPage] = useState(currentPage);
-  if (selectionPage !== currentPage) {
-    setSelectionPage(currentPage);
-    setActiveSelection(null);
-    setPendingHighlightData(null);
-  }
-  const [pageDimensions, setPageDimensions] = useState<{
-    width: number;
-    height: number;
-  } | null>(null);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pageContainerRef = useRef<HTMLDivElement | null>(null);
-  const textLayerRef = useRef<HTMLDivElement | null>(null);
-  const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
-  const pdfjsLibRef = useRef<typeof import("pdfjs-dist") | null>(null);
-  const renderTaskRef = useRef<RenderTask | null>(null);
-  const textLayerTaskRef = useRef<TextLayer | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const pagesRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
-
-  // 1. Fetch direct CDN Signed URL (ТЗ §2)
+  const pendingScrollPageRef = useRef<number | null>(
+    initialPage && initialPage >= 1 ? initialPage : null
+  );
+  const userScrolledRef = useRef(false);
+  const progressReadyRef = useRef(Boolean(initialPage && initialPage >= 1));
+  const anchorRef = useRef({ page: 1, fraction: 0 });
+  const lastScrollTopRef = useRef(0);
+  const activeSelectionRef = useRef<SelectionRange | null>(null);
   useEffect(() => {
-    let active = true;
-    async function fetchSignedUrl() {
+    activeSelectionRef.current = activeSelection;
+  }, [activeSelection]);
+
+  const fitWidth = Math.max(
+    0,
+    Math.min(containerWidth - (containerWidth < 640 ? 16 : 64), MAX_FIT_WIDTH)
+  );
+  const pageWidth = Math.round(fitWidth * zoom);
+
+  const highlightsByPage = useMemo(() => {
+    const map: Record<number, Highlight[]> = {};
+    for (const h of highlights) {
+      if (!h.pageNumber) continue;
+      (map[h.pageNumber] ??= []).push(h);
+    }
+    return map;
+  }, [highlights]);
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(null), 3000);
+  }, []);
+
+  // 2. Load the document with range requests (no full download up front).
+  useEffect(() => {
+    let cancelled = false;
+    let loaded: PDFDocumentProxy | null = null;
+    const abort = new AbortController();
+
+    (async () => {
       try {
-        const res = await fetch(`/api/books/${book.id}/signed-pdf-url`);
-        if (res.ok && active) {
-          const data = await res.json();
-          if (data.signedUrl) {
-            setActivePdfUrl(data.signedUrl);
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+
+        const isCrossOrigin = new URL(activePdfUrl, window.location.href).origin !== window.location.origin;
+        const byRanges = isCrossOrigin
+          ? await openPdfByRanges(pdfjs, activePdfUrl, book.fileSizeBytes, abort.signal)
+          : null;
+        const loadingTask =
+          byRanges ??
+          // Same-origin proxy exposes all headers, so PDF.js handles ranges itself.
+          pdfjs.getDocument({
+            url: activePdfUrl,
+            rangeChunkSize: RANGE_CHUNK_SIZE,
+            disableAutoFetch: true,
+            disableStream: true,
+            cMapUrl: CMAP_URL,
+            cMapPacked: true,
+          });
+        if (cancelled) {
+          loadingTask.destroy();
+          return;
+        }
+        const pdfDoc = await loadingTask.promise;
+        loaded = pdfDoc;
+        if (cancelled) return;
+
+        const first = await pdfDoc.getPage(1);
+        if (cancelled) return;
+        const base = first.getViewport({ scale: 1 });
+
+        setDefaultRatio(base.height / base.width);
+        setNumPages(pdfDoc.numPages);
+        setDoc({ pdfDoc, pdfjs });
+      } catch (err: unknown) {
+        if (cancelled) return;
+        // A signed URL can expire or be blocked; retry once through the proxy.
+        if (fallbackUrl && activePdfUrl !== fallbackUrl) {
+          console.warn("PDF load via signed URL failed, using proxy:", err);
+          setActivePdfUrl(fallbackUrl);
+          return;
+        }
+        console.error("PDF load error:", err);
+        setError(
+          (err instanceof Error && err.message) ||
+            "Не удалось загрузить PDF. Проверьте подключение к сети."
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      abort.abort();
+      loaded?.destroy();
+    };
+  }, [activePdfUrl, fallbackUrl, reloadKey, book.fileSizeBytes]);
+
+  // 3. Restore reading position: local copy first, then the server value.
+  useEffect(() => {
+    if (initialPage && initialPage >= 1) return;
+    let active = true;
+
+    let localPage = 0;
+    try {
+      localPage = parseInt(localStorage.getItem(`madaq_progress_${book.id}`) || "", 10) || 0;
+    } catch {}
+    if (localPage > 1) pendingScrollPageRef.current = localPage;
+
+    fetch(`/api/books/${book.id}/progress`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active) return;
+        const serverPage = data?.lastReadPage;
+        if (serverPage > 1 && serverPage !== localPage && !userScrolledRef.current) {
+          pendingScrollPageRef.current = serverPage;
+          // If the document is already laid out, jump right away.
+          const el = pagesRef.current?.children[serverPage - 1] as HTMLElement | undefined;
+          if (el && scrollRef.current) {
+            scrollRef.current.scrollTop = el.offsetTop - PAGE_GAP;
+            pendingScrollPageRef.current = null;
+            showToast(`Продолжаем с ${serverPage} страницы`);
           }
         }
-      } catch {
-        // Keep fallback pdfUrl
-      }
-    }
-    fetchSignedUrl();
+      })
+      .catch(() => {})
+      .finally(() => {
+        progressReadyRef.current = true;
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [book.id, initialPage, showToast]);
+
+  // 4. Load all PDF highlights of the book once.
+  useEffect(() => {
+    let active = true;
+    fetchPdfBookHighlights(book.id)
+      .then((list) => {
+        if (active) setHighlights(list);
+      })
+      .catch((err) => console.warn("Could not load PDF highlights:", err));
     return () => {
       active = false;
     };
   }, [book.id]);
 
-  // 2. Restore reading progress on mount (ТЗ §1: last_read_page)
+  // Track the available width (fit-to-width layout).
   useEffect(() => {
-    let active = true;
-    async function restoreProgress() {
-      if (initialPage && initialPage >= 1) {
-        return;
-      }
+    const el = scrollRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      setContainerWidth(Math.round(entries[0].contentRect.width));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-      try {
-        // Fast local restore first
-        const local = localStorage.getItem(`madaq_progress_${book.id}`);
-        if (local) {
-          const p = parseInt(local, 10);
-          if (p > 1) {
-            setCurrentPage(p);
-            setPageInput(String(p));
-            setToastMessage(`Продолжаем с ${p} страницы`);
-            setTimeout(() => setToastMessage(null), 3500);
-          }
-        }
+  const updateVisiblePages = useCallback(() => {
+    const scroller = scrollRef.current;
+    const pages = pagesRef.current?.children;
+    if (!scroller || !pages || pages.length === 0) return;
 
-        // Database sync
-        const res = await fetch(`/api/books/${book.id}/progress`);
-        if (res.ok && active) {
-          const data = await res.json();
-          if (
-            data.lastReadPage &&
-            data.lastReadPage > 1 &&
-            (!local || parseInt(local, 10) !== data.lastReadPage)
-          ) {
-            setCurrentPage(data.lastReadPage);
-            setPageInput(String(data.lastReadPage));
-            setToastMessage(`Продолжаем с ${data.lastReadPage} страницы`);
-            setTimeout(() => setToastMessage(null), 3500);
-          }
-        }
-      } catch (err) {
-        console.warn("Could not restore reading progress:", err);
-      }
-    }
-    restoreProgress();
-    return () => {
-      active = false;
+    const top = scroller.scrollTop;
+    const firstIdx = pageIndexAt(pages, top);
+    const lastIdx = pageIndexAt(pages, top + scroller.clientHeight);
+    const currentIdx = pageIndexAt(pages, top + scroller.clientHeight * 0.4);
+
+    const firstEl = pages[firstIdx] as HTMLElement;
+    anchorRef.current = {
+      page: firstIdx + 1,
+      fraction: firstEl.offsetHeight
+        ? (top - firstEl.offsetTop) / firstEl.offsetHeight
+        : 0,
     };
-  }, [book.id, initialPage]);
 
-  // 3. Auto-save reading progress on page change (debounced 600ms, ТЗ §1)
+    setVisibleRange((prev) =>
+      prev.first === firstIdx + 1 && prev.last === lastIdx + 1
+        ? prev
+        : { first: firstIdx + 1, last: lastIdx + 1 }
+    );
+    setCurrentPage(currentIdx + 1);
+  }, []);
+
+  const scrollToPage = useCallback((pageNumber: number) => {
+    const el = pagesRef.current?.children[pageNumber - 1] as HTMLElement | undefined;
+    if (el && scrollRef.current) {
+      scrollRef.current.scrollTop = el.offsetTop - PAGE_GAP;
+    }
+  }, []);
+
+  // After layout is ready, jump to the restored page once.
+  useLayoutEffect(() => {
+    if (!doc || pageWidth <= 0) return;
+    const target = pendingScrollPageRef.current;
+    if (target && target > 1) {
+      scrollToPage(Math.min(target, doc.pdfDoc.numPages));
+      if (!initialPage) showToast(`Продолжаем с ${target} страницы`);
+    }
+    pendingScrollPageRef.current = null;
+    updateVisiblePages();
+    // Only on first layout of a loaded document.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, pageWidth > 0]);
+
+  // Keep the same spot on screen when zoom or window width changes.
+  const prevPageWidthRef = useRef(pageWidth);
+  useLayoutEffect(() => {
+    const prev = prevPageWidthRef.current;
+    prevPageWidthRef.current = pageWidth;
+    if (!doc || prev <= 0 || prev === pageWidth) return;
+    const { page, fraction } = anchorRef.current;
+    const el = pagesRef.current?.children[page - 1] as HTMLElement | undefined;
+    if (el && scrollRef.current) {
+      scrollRef.current.scrollTop = el.offsetTop + fraction * el.offsetHeight;
+    }
+    updateVisiblePages();
+  }, [pageWidth, doc, updateVisiblePages]);
+
+  const handleScroll = useCallback(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    userScrolledRef.current = true;
+
+    const top = scroller.scrollTop;
+    const delta = top - lastScrollTopRef.current;
+    lastScrollTopRef.current = top;
+    if (delta > 6 && top > TOP_PADDING) setChromeVisible(false);
+    else if (delta < -6) setChromeVisible(true);
+
+    if (activeSelectionRef.current && Math.abs(delta) > 0) {
+      setActiveSelection(null);
+      setPendingHighlightData(null);
+    }
+
+    updateVisiblePages();
+  }, [updateVisiblePages]);
+
+  // 5. Auto-save reading progress (debounced).
   useEffect(() => {
-    if (isLoading || currentPage < 1) return;
-
+    if (!doc || !progressReadyRef.current) return;
     try {
       localStorage.setItem(`madaq_progress_${book.id}`, String(currentPage));
     } catch {}
-
     const timer = setTimeout(() => {
       fetch(`/api/books/${book.id}/progress`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ page: currentPage, totalPages: numPages }),
       }).catch(() => {});
-    }, 600);
-
+    }, 800);
     return () => clearTimeout(timer);
-  }, [currentPage, numPages, book.id, isLoading]);
+  }, [currentPage, numPages, book.id, doc]);
 
-  // 4. Load PDF Document with HTTP 206 Progressive Streaming
-  useEffect(() => {
-    let isCancelled = false;
+  const handleAspectRatio = useCallback((pageNumber: number, ratio: number) => {
+    setPageRatios((prev) =>
+      Math.abs((prev[pageNumber] ?? 0) - ratio) < 0.001
+        ? prev
+        : { ...prev, [pageNumber]: ratio }
+    );
+  }, []);
 
-    async function initPdf() {
-      setIsLoading(true);
-      setError(null);
-      setLoadingProgress(10);
-
-      try {
-        const pdfjs = await import("pdfjs-dist");
-        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-        pdfjsLibRef.current = pdfjs;
-
-        setLoadingProgress(30);
-
-        // Progressive streaming with 64KB range chunks (ТЗ §2)
-        const loadingTask = pdfjs.getDocument({
-          url: activePdfUrl,
-          rangeChunkSize: 65536, // 64 KB chunks for progressive loading
-          disableAutoFetch: true, // Don't download entire 100+ MB file at once
-          disableStream: false,
-          cMapUrl: "https://unpkg.com/pdfjs-dist@4.4.168/cmaps/",
-          cMapPacked: true,
-        });
-
-        loadingTask.onProgress = (progressData: { loaded: number; total: number }) => {
-          if (progressData.total > 0) {
-            const percent = Math.min(
-              90,
-              Math.round((progressData.loaded / progressData.total) * 90)
-            );
-            setLoadingProgress(percent);
-          }
-        };
-
-        const pdfDoc = await loadingTask.promise;
-        if (isCancelled) return;
-
-        pdfDocRef.current = pdfDoc;
-        setNumPages(pdfDoc.numPages);
-        setLoadingProgress(100);
-        setIsLoading(false);
-      } catch (err: unknown) {
-        if (!isCancelled) {
-          console.error("PDF progressive load error:", err);
-          setError(
-            (err instanceof Error && err.message) ||
-              "Не удалось загрузить PDF документ. Проверьте подключение к сети."
-          );
-          setIsLoading(false);
-        }
-      }
-    }
-
-    initPdf();
-
-    return () => {
-      isCancelled = true;
-      if (pdfDocRef.current) {
-        pdfDocRef.current.destroy?.();
-      }
-    };
-  }, [activePdfUrl]);
-
-  // 5. Render Current Page & TextLayer
-  const renderPage = useCallback(
-    async (pageNum: number) => {
-      if (!pdfDocRef.current || !canvasRef.current) return;
-
-      try {
-        if (renderTaskRef.current) {
-          renderTaskRef.current.cancel();
-        }
-
-        const page = await pdfDocRef.current.getPage(pageNum);
-        const canvas = canvasRef.current;
-        const context = canvas.getContext("2d");
-        if (!context) return;
-
-        const viewport = page.getViewport({ scale });
-        const outputScale = window.devicePixelRatio || 1;
-
-        const vpWidth = Math.floor(viewport.width);
-        const vpHeight = Math.floor(viewport.height);
-        setPageDimensions({ width: vpWidth, height: vpHeight });
-
-        canvas.width = Math.floor(viewport.width * outputScale);
-        canvas.height = Math.floor(viewport.height * outputScale);
-        canvas.style.width = `${vpWidth}px`;
-        canvas.style.height = `${vpHeight}px`;
-
-        const transform =
-          outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
-
-        const renderContext = {
-          canvasContext: context,
-          transform,
-          viewport,
-        };
-
-        const renderTask = page.render(renderContext);
-        renderTaskRef.current = renderTask;
-        await renderTask.promise;
-
-        // Render PDF TextLayer
-        if (textLayerRef.current && pdfjsLibRef.current) {
-          if (textLayerTaskRef.current) {
-            textLayerTaskRef.current.cancel?.();
-            textLayerTaskRef.current = null;
-          }
-          textLayerRef.current.innerHTML = "";
-          try {
-            const textContent = await page.getTextContent();
-            if (textContent.items.length > 0) {
-              const textLayer = new pdfjsLibRef.current.TextLayer({
-                textContentSource: textContent,
-                container: textLayerRef.current,
-                viewport,
-              });
-              textLayerTaskRef.current = textLayer;
-              await textLayer.render();
-            }
-          } catch (textErr: unknown) {
-            if ((textErr as Error | null)?.name !== "RenderingCancelledException") {
-              console.warn("Text layer render error / scanned page:", textErr);
-            }
-          }
-        }
-      } catch (err: unknown) {
-        if ((err as Error | null)?.name !== "RenderingCancelledException") {
-          console.warn("PDF page render warning:", err);
-        }
-      }
-    },
-    [scale]
-  );
-
-  // Load highlights for current page
-  useEffect(() => {
-    let active = true;
-    async function loadHighlights() {
-      try {
-        const pageHighlights = await fetchPdfPageHighlights(book.id, currentPage);
-        if (active) {
-          setHighlights(pageHighlights);
-        }
-      } catch (err) {
-        console.warn("Could not load PDF page highlights:", err);
-      }
-    }
-    loadHighlights();
-    return () => {
-      active = false;
-    };
-  }, [book.id, currentPage]);
-
-  const handlePageSelectionEnd = useCallback(() => {
+  // Selection → open highlight menu.
+  const handleSelectionEnd = useCallback(() => {
     setTimeout(() => {
       const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
-        return;
-      }
-
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
       const selText = sel.toString().trim();
-      if (!selText || !pageContainerRef.current) {
-        return;
-      }
+      if (!selText) return;
 
       const range = sel.getRangeAt(0);
-      if (!pageContainerRef.current.contains(range.commonAncestorContainer)) {
-        return;
-      }
+      const pageEl = pageElementFromNode(range.startContainer);
+      if (!pageEl) return;
+      const pageNumber = Number(pageEl.dataset.pdfPage);
 
-      const containerRect = pageContainerRef.current.getBoundingClientRect();
-      const clientRects = Array.from(range.getClientRects());
-      const mergedRects = normalizeAndMergeRects(clientRects, containerRect);
+      // Rects outside the starting page collapse to zero size and are dropped.
+      const rects = normalizeAndMergeRects(
+        Array.from(range.getClientRects()),
+        pageEl.getBoundingClientRect()
+      );
+      if (rects.length === 0) return;
 
-      if (mergedRects.length === 0) {
-        return;
-      }
-
-      const overallRect = range.getBoundingClientRect();
-      setPendingHighlightData({
-        rects: mergedRects,
-        selectedText: selText,
-      });
+      setPendingHighlightData({ pageNumber, rects, selectedText: selText });
       setActiveSelection({
-        rect: overallRect,
+        rect: range.getBoundingClientRect(),
         existingHighlight: null,
       });
     }, 20);
   }, []);
 
-  const handleContainerClick = (e: React.MouseEvent) => {
+  // Click → open an existing highlight, close the menu, or toggle the header.
+  const handlePagesClick = (e: React.MouseEvent) => {
     const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) {
-      return;
-    }
+    if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) return;
 
-    if (!pageContainerRef.current) return;
-    const containerRect = pageContainerRef.current.getBoundingClientRect();
-    const clickX = (e.clientX - containerRect.left) / containerRect.width;
-    const clickY = (e.clientY - containerRect.top) / containerRect.height;
-
-    const hitHighlight = highlights.find((h) => {
-      const rects = (h.rects as PdfHighlightRect[]) || [];
-      return rects.some(
-        (r) =>
-          clickX >= r.x - 0.005 &&
-          clickX <= r.x + r.width + 0.005 &&
-          clickY >= r.y - 0.005 &&
-          clickY <= r.y + r.height + 0.005
+    const pageEl = pageElementFromNode(e.target as Node);
+    if (pageEl) {
+      const pageNumber = Number(pageEl.dataset.pdfPage);
+      const box = pageEl.getBoundingClientRect();
+      const x = (e.clientX - box.left) / box.width;
+      const y = (e.clientY - box.top) / box.height;
+      const hit = (highlightsByPage[pageNumber] || []).find((h) =>
+        ((h.rects as PdfHighlightRect[]) || []).some(
+          (r) =>
+            x >= r.x - 0.005 &&
+            x <= r.x + r.width + 0.005 &&
+            y >= r.y - 0.005 &&
+            y <= r.y + r.height + 0.005
+        )
       );
-    });
-
-    if (hitHighlight) {
-      setPendingHighlightData(null);
-      setActiveSelection({
-        rect: {
-          left: e.clientX,
-          top: e.clientY,
-          right: e.clientX,
-          bottom: e.clientY,
-          width: 0,
-          height: 0,
-        } as DOMRect,
-        existingHighlight: hitHighlight,
-      });
-    } else {
-      if (activeSelection) {
-        setActiveSelection(null);
+      if (hit) {
         setPendingHighlightData(null);
+        setActiveSelection({
+          rect: {
+            left: e.clientX,
+            top: e.clientY,
+            right: e.clientX,
+            bottom: e.clientY,
+            width: 0,
+            height: 0,
+          } as DOMRect,
+          existingHighlight: hit,
+        });
+        return;
       }
     }
+
+    if (activeSelection) {
+      setActiveSelection(null);
+      setPendingHighlightData(null);
+      return;
+    }
+    setChromeVisible((v) => !v);
   };
 
   const handleSelectHighlightColor = async (type: HighlightType) => {
     if (activeSelection?.existingHighlight) {
       const targetId = activeSelection.existingHighlight.id;
-      const updated: Highlight = {
-        ...activeSelection.existingHighlight,
-        type,
-      };
-      setHighlights((prev) =>
-        prev.map((h) => (h.id === targetId ? updated : h))
-      );
+      const updated: Highlight = { ...activeSelection.existingHighlight, type };
+      setHighlights((prev) => prev.map((h) => (h.id === targetId ? updated : h)));
       setActiveSelection(null);
-
       try {
         await updatePdfHighlightCategory(targetId, type);
       } catch (err) {
         console.warn("Failed to update highlight category:", err);
       }
     } else if (pendingHighlightData) {
-      const { rects, selectedText } = pendingHighlightData;
+      const { pageNumber, rects, selectedText } = pendingHighlightData;
       const tempId = `temp-${Date.now()}`;
       const tempHighlight: Highlight = {
         id: tempId,
         bookId: book.id,
-        pageNumber: currentPage,
+        pageNumber,
         rects,
         selectedText,
         type,
@@ -516,18 +657,17 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
       try {
         const res = await savePdfHighlight({
           bookId: book.id,
-          pageNumber: currentPage,
+          pageNumber,
           rects,
           selectedText,
           type,
         });
-        if (res.ok) {
-          setHighlights((prev) =>
-            prev.map((h) => (h.id === tempId ? res.highlight : h))
-          );
-        } else {
-          setHighlights((prev) => prev.filter((h) => h.id !== tempId));
-        }
+        setHighlights((prev) =>
+          res.ok
+            ? prev.map((h) => (h.id === tempId ? res.highlight : h))
+            : prev.filter((h) => h.id !== tempId)
+        );
+        if (!res.ok) showToast(res.message);
       } catch {
         setHighlights((prev) => prev.filter((h) => h.id !== tempId));
       }
@@ -539,7 +679,6 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
     const targetId = activeSelection.existingHighlight.id;
     setHighlights((prev) => prev.filter((h) => h.id !== targetId));
     setActiveSelection(null);
-
     try {
       await removePdfHighlight(targetId);
     } catch {
@@ -547,18 +686,10 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
     }
   };
 
-  useEffect(() => {
-    if (!isLoading && pdfDocRef.current) {
-      renderPage(currentPage);
-      setPageInput(String(currentPage));
-    }
-  }, [currentPage, scale, isLoading, renderPage]);
-
-  // 6. In-book Content Search (Debounced, pg_trgm powered)
+  // In-book search (debounced).
   useEffect(() => {
     if (!isSearchActive) return;
     const query = trimmedSearchQuery;
-
     const handler = setTimeout(async () => {
       let results: SearchResult[] = [];
       try {
@@ -575,483 +706,274 @@ export function PdfReader({ book, pdfUrl, initialPage }: PdfReaderProps) {
         setSearchState({ query, results });
       }
     }, 250);
-
     return () => clearTimeout(handler);
   }, [isSearchActive, trimmedSearchQuery, book.id]);
 
-  // 7. Touch / Swipe Event Handlers for Mobile & Tablets (ТЗ §3)
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 1) {
-      touchStartRef.current = {
-        x: e.touches[0].clientX,
-        y: e.touches[0].clientY,
-        time: Date.now(),
-      };
-    }
-  };
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    setChromeVisible(true);
+    setTimeout(() => searchInputRef.current?.focus(), 50);
+  }, []);
 
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStartRef.current || e.changedTouches.length === 0) return;
-    const endX = e.changedTouches[0].clientX;
-    const endY = e.changedTouches[0].clientY;
-    const diffX = endX - touchStartRef.current.x;
-    const diffY = endY - touchStartRef.current.y;
-    const diffTime = Date.now() - touchStartRef.current.time;
-
-    // Detect horizontal swipe gesture
-    if (
-      diffTime < 600 &&
-      Math.abs(diffX) > 45 &&
-      Math.abs(diffX) > Math.abs(diffY) * 1.4
-    ) {
-      if (diffX < 0) {
-        // Swipe Left -> Next Page
-        setCurrentPage((prev) => Math.min(prev + 1, numPages || prev));
-      } else {
-        // Swipe Right -> Prev Page
-        setCurrentPage((prev) => Math.max(prev - 1, 1));
-      }
-    }
-    touchStartRef.current = null;
-  };
-
-  // 8. Keyboard navigation & shortcuts
+  // Keyboard shortcuts.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "f") {
         e.preventDefault();
-        setSearchOpen((prev) => {
-          const next = !prev;
-          if (next) setTimeout(() => searchInputRef.current?.focus(), 50);
-          return next;
-        });
+        openSearch();
         return;
       }
-
       if (e.key === "Escape" && searchOpen) {
         setSearchOpen(false);
         return;
       }
+      if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey) return;
 
-      if (e.target instanceof HTMLInputElement) return;
-
-      if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === "j") {
+      if (e.key === "ArrowRight" || e.key === "j") {
         e.preventDefault();
-        setCurrentPage((prev) => Math.min(prev + 1, numPages || prev));
-      } else if (e.key === "ArrowLeft" || e.key === "PageUp" || e.key === "k") {
+        scrollToPage(Math.min(currentPage + 1, numPages));
+      } else if (e.key === "ArrowLeft" || e.key === "k") {
         e.preventDefault();
-        setCurrentPage((prev) => Math.max(prev - 1, 1));
+        scrollToPage(Math.max(currentPage - 1, 1));
       } else if (e.key === "+" || e.key === "=") {
         e.preventDefault();
-        setScale((prev) => Math.min(prev + 0.2, 3.0));
+        setZoom((z) => Math.min(+(z + 0.25).toFixed(2), MAX_ZOOM));
       } else if (e.key === "-") {
         e.preventDefault();
-        setScale((prev) => Math.max(prev - 0.2, 0.6));
+        setZoom((z) => Math.max(+(z - 0.25).toFixed(2), MIN_ZOOM));
+      } else if (e.key === "0") {
+        e.preventDefault();
+        setZoom(1);
       }
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [numPages, searchOpen]);
+  }, [currentPage, numPages, searchOpen, openSearch, scrollToPage]);
 
-  const handlePageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPageInput(e.target.value);
+  const submitPageDraft = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const p = parseInt(pageDraft ?? "", 10);
+    if (!isNaN(p) && p >= 1 && p <= numPages) scrollToPage(p);
+    setPageDraft(null);
   };
 
-  const handlePageInputSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const p = parseInt(pageInput, 10);
-    if (!isNaN(p) && p >= 1 && p <= numPages) {
-      setCurrentPage(p);
-    } else {
-      setPageInput(String(currentPage));
-    }
+  const jumpToPage = (pageNumber: number) => {
+    if (pageNumber < 1 || pageNumber > numPages) return;
+    scrollToPage(pageNumber);
+    if (window.innerWidth < 768) setSearchOpen(false);
   };
 
-  const jumpToPage = (pageNum: number) => {
-    if (pageNum >= 1 && pageNum <= numPages) {
-      setCurrentPage(pageNum);
-      if (window.innerWidth < 768) {
-        setSearchOpen(false);
-      }
-    }
-  };
+  // Pages near the viewport get rendered; the rest stay as sized placeholders.
+  const activeFirst = visibleRange.first - 1;
+  const activeLast = visibleRange.last + 2;
+  const isLoading = !doc && !error;
 
   return (
-    <div
-      className="flex h-screen w-screen flex-col overflow-hidden bg-paper text-ink select-none"
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-    >
-      {/* Toast Notification (e.g. "Продолжаем с 14 страницы") */}
+    <div className="relative flex h-dvh w-screen flex-col overflow-hidden bg-[#e9e6e1] text-ink select-none">
+      {/* Header: overlays the pages and hides while reading */}
+      <header
+        className={`absolute inset-x-0 top-0 z-30 flex h-12 items-center gap-2 border-b border-border/60 bg-paper-soft/90 px-2 backdrop-blur-md transition-transform duration-200 sm:px-4 ${
+          chromeVisible || searchOpen ? "translate-y-0" : "-translate-y-full"
+        }`}
+      >
+        <Link
+          href={`/books/${book.id}`}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-border/60 hover:text-ink"
+          title="Назад к книге"
+          aria-label="Назад к книге"
+        >
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </Link>
+
+        <h1 className="min-w-0 flex-1 truncate text-center font-serif text-sm text-ink">
+          {book.title}
+        </h1>
+
+        {numPages > 0 && (
+          <form onSubmit={submitPageDraft} className="flex shrink-0 items-center text-xs text-ink-muted">
+            {pageDraft !== null ? (
+              <input
+                autoFocus
+                inputMode="numeric"
+                value={pageDraft}
+                onChange={(e) => setPageDraft(e.target.value)}
+                onBlur={() => submitPageDraft()}
+                className="h-7 w-12 rounded border border-border bg-paper text-center font-mono text-xs text-ink focus:border-accent focus:outline-none"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPageDraft(String(currentPage))}
+                className="rounded px-1.5 py-1 font-mono tabular-nums text-ink hover:bg-border/60"
+                title="Перейти к странице"
+              >
+                {currentPage}
+              </button>
+            )}
+            <span className="pl-1 font-mono tabular-nums">/ {numPages}</span>
+          </form>
+        )}
+
+        <button
+          onClick={() => (searchOpen ? setSearchOpen(false) : openSearch())}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors ${
+            searchOpen ? "bg-accent text-paper-soft" : "text-ink-muted hover:bg-border/60 hover:text-ink"
+          }`}
+          title="Поиск в книге (Cmd+F)"
+          aria-label="Поиск в книге"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </button>
+      </header>
+
       {toastMessage && (
-        <div className="absolute top-16 left-1/2 z-50 -translate-x-1/2 rounded-full border border-border bg-paper-soft/95 px-4 py-2 text-xs font-medium text-ink shadow-xl backdrop-blur-md transition-all animate-in fade-in slide-in-from-top-2">
-          📖 {toastMessage}
+        <div className="absolute top-16 left-1/2 z-40 -translate-x-1/2 rounded-full border border-border bg-paper-soft/95 px-4 py-2 text-xs text-ink shadow-lg backdrop-blur-md">
+          {toastMessage}
         </div>
       )}
 
-      {/* Top Header Controls — unified with EPUB reader */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-paper-soft px-3 sm:px-5 shadow-xs select-none z-20">
-        {/* Left: Search Toggle Button */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              setSearchOpen((prev) => {
-                const next = !prev;
-                if (next) setTimeout(() => searchInputRef.current?.focus(), 50);
-                return next;
-              });
-            }}
-            className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs sm:text-sm font-medium transition-all active:scale-95 ${
-              searchOpen
-                ? "bg-accent text-paper-soft shadow-xs"
-                : "text-ink hover:bg-border/60"
-            }`}
-            title="Поиск внутри книги (Cmd+F)"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+      {/* Search drawer */}
+      {searchOpen && (
+        <aside className="absolute top-12 bottom-0 left-0 z-30 flex w-full flex-col border-r border-border bg-paper-soft shadow-2xl sm:w-80">
+          <div className="flex items-center gap-2 p-3">
+            <div className="relative flex-1">
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Слово или фраза…"
+                className="w-full rounded-md border border-border bg-paper py-2 pr-3 pl-8 text-sm text-ink placeholder:text-ink-muted focus:border-accent focus:outline-none"
               />
-            </svg>
-            <span className="hidden sm:inline">Поиск в книге</span>
-          </button>
-        </div>
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 text-ink-muted">
+                {isSearching ? (
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-accent" />
+                ) : (
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={() => setSearchOpen(false)}
+              className="rounded-md p-1.5 text-ink-muted hover:bg-border/60 hover:text-ink"
+              aria-label="Закрыть поиск"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
 
-        {/* Center: Title & Author */}
-        <div className="flex flex-col items-center justify-center max-w-[42%] sm:max-w-[50%] px-2 text-center truncate">
-          <div className="flex items-center gap-2 truncate justify-center max-w-full">
-            <h1 className="truncate font-serif text-sm sm:text-base font-medium text-ink">
-              {book.title}
-            </h1>
-            {book.isLinearized && (
-              <span
-                className="hidden lg:inline-flex items-center rounded-full bg-emerald-800/10 px-2 py-0.5 text-[10px] font-medium text-emerald-800 border border-emerald-700/30"
-                title="Fast Web View: потоковая загрузка HTTP 206 Range"
-              >
-                ⚡ Fast Web View
-              </span>
+          <div className="flex-1 overflow-y-auto px-3 pb-3">
+            {isSearchActive && searchResults.length === 0 && !isSearching && (
+              <p className="mt-4 text-center text-xs text-ink-muted">Ничего не найдено</p>
+            )}
+            {searchResults.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] text-ink-muted">Найдено: {searchResults.length}</p>
+                {searchResults.map((res, i) => (
+                  <button
+                    key={i}
+                    onClick={() => jumpToPage(res.pageNumber)}
+                    className={`flex flex-col items-start rounded-lg border p-2.5 text-left transition-colors ${
+                      currentPage === res.pageNumber
+                        ? "border-accent bg-accent/10"
+                        : "border-border bg-paper hover:border-accent/40"
+                    }`}
+                  >
+                    <span className="text-[11px] font-medium text-accent">Страница {res.pageNumber}</span>
+                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-ink">{res.snippet}</p>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
-          <span className="w-full truncate text-[11px] text-ink-muted">
-            {book.author?.name || "Автор неизвестен"}
-          </span>
-        </div>
+        </aside>
+      )}
 
-        {/* Right: Page Navigation, Zoom & Return to book */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Page controls */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-              disabled={currentPage <= 1 || isLoading}
-              className="rounded-md p-1.5 text-ink-muted hover:text-ink hover:bg-border/60 active:scale-95 transition-all disabled:opacity-30"
-              title="Предыдущая страница (← / свайп вправо)"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-
-            <form
-              onSubmit={handlePageInputSubmit}
-              className="flex items-center gap-1 text-xs text-ink-muted"
-            >
-              <input
-                type="text"
-                value={pageInput}
-                onChange={handlePageInputChange}
-                onBlur={handlePageInputSubmit}
-                className="h-7 w-12 rounded border border-border bg-paper text-center font-mono text-xs text-ink focus:border-accent focus:outline-none"
-              />
-              <span className="text-[11px]">/ {numPages || "…"}</span>
-            </form>
-
-            <button
-              onClick={() => setCurrentPage((p) => Math.min(p + 1, numPages))}
-              disabled={currentPage >= numPages || isLoading}
-              className="rounded-md p-1.5 text-ink-muted hover:text-ink hover:bg-border/60 active:scale-95 transition-all disabled:opacity-30"
-              title="Следующая страница (→ / свайп влево)"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
+      {/* Pages */}
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="relative flex-1 overflow-auto overscroll-contain"
+      >
+        {isLoading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-ink-muted">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" />
+            <p className="text-sm">Открываем книгу…</p>
           </div>
-
-          {/* Zoom controls */}
-          <div className="hidden items-center gap-1 sm:flex ml-1">
-            <button
-              onClick={() => setScale((s) => Math.max(s - 0.2, 0.6))}
-              className="rounded-md p-1.5 text-ink-muted hover:text-ink hover:bg-border/60 active:scale-95 transition-all"
-              title="Уменьшить (-)"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-              </svg>
-            </button>
-            <span className="w-9 text-center font-mono text-xs text-ink-muted">
-              {Math.round(scale * 100)}%
-            </span>
-            <button
-              onClick={() => setScale((s) => Math.min(s + 0.2, 3.0))}
-              className="rounded-md p-1.5 text-ink-muted hover:text-ink hover:bg-border/60 active:scale-95 transition-all"
-              title="Увеличить (+)"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-            </button>
-          </div>
-
-          <div className="h-4 w-px bg-border mx-0.5" />
-
-          {/* Switch to text reader if available */}
-          <Link
-            href={`/books/${book.id}/read?mode=text`}
-            className="hidden md:flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-ink-muted hover:text-ink hover:bg-border/60 transition-colors"
-            title="Переключиться в текстовый режим"
-          >
-            <svg className="h-3.5 w-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
-            </svg>
-            <span>Текст</span>
-          </Link>
-
-          {/* Back to book button */}
-          <Link
-            href={`/books/${book.id}`}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs sm:text-sm font-medium text-ink-muted hover:text-ink hover:bg-border/60 transition-colors"
-            title="Вернуться к информации о книге"
-          >
-            <span className="hidden md:inline">К книге</span>
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </Link>
-        </div>
-      </header>
-
-      {/* Main Content Area: Search Sidebar + Canvas Viewport */}
-      <div className="relative flex flex-1 overflow-hidden bg-paper">
-        {/* In-Book Search Drawer (ТЗ §4) */}
-        {searchOpen && (
-          <aside className="absolute inset-y-0 left-0 z-30 flex w-80 flex-col border-r border-border bg-paper-soft shadow-2xl transition-all">
-            <div className="flex items-center justify-between border-b border-border p-3">
-              <span className="text-xs font-serif font-medium text-ink">
-                Поиск по содержимому книги
-              </span>
-              <button
-                onClick={() => setSearchOpen(false)}
-                className="rounded-md p-1 text-ink-muted hover:bg-border/60 hover:text-ink transition-colors"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="p-3">
-              <div className="relative">
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Введите слово или фразу…"
-                  className="w-full rounded-md border border-border bg-paper py-2 pl-8 pr-3 text-xs text-ink placeholder:text-ink-muted focus:border-accent focus:outline-none"
-                />
-                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 text-ink-muted">
-                  {isSearching ? (
-                    <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-accent" />
-                  ) : (
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Results list */}
-            <div className="flex-1 overflow-y-auto px-3 pb-3">
-              {searchQuery.trim().length >= 2 && searchResults.length === 0 && !isSearching && (
-                <p className="mt-4 text-center text-xs text-ink-muted">
-                  Ничего не найдено в тексте книги
-                </p>
-              )}
-
-              {searchResults.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <p className="text-[11px] font-medium text-ink-muted">
-                    Найдено совпадений: {searchResults.length}
-                  </p>
-                  {searchResults.map((res, i) => (
-                    <button
-                      key={i}
-                      onClick={() => jumpToPage(res.pageNumber)}
-                      className={`group flex flex-col items-start rounded-lg border p-2.5 text-left transition-colors ${
-                        currentPage === res.pageNumber
-                          ? "border-accent bg-accent/10"
-                          : "border-border bg-paper hover:border-accent/40 hover:bg-paper-soft"
-                      }`}
-                    >
-                      <div className="flex w-full items-center justify-between text-[11px] font-medium text-accent">
-                        <span>Страница {res.pageNumber}</span>
-                        <span className="text-[10px] text-ink-muted group-hover:text-ink">
-                          Перейти →
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs leading-relaxed text-ink line-clamp-2">
-                        {res.snippet}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </aside>
         )}
 
-        {/* Main Canvas Viewport Area */}
-        <main className="relative flex flex-1 items-start justify-center overflow-auto p-4 sm:p-8 bg-paper">
-          {isLoading && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-paper/90 backdrop-blur-xs z-10 text-ink">
-              <div className="h-9 w-9 animate-spin rounded-full border-2 border-border border-t-accent" />
-              <p className="font-serif text-sm text-ink">
-                Потоковая загрузка PDF (HTTP 206)…
-              </p>
-              <div className="h-1.5 w-48 overflow-hidden rounded-full bg-border">
-                <div
-                  className="h-full bg-accent transition-all duration-200"
-                  style={{ width: `${loadingProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div className="mx-auto max-w-md rounded-xl border border-red-500/20 bg-red-950/20 p-6 text-center text-red-700">
-              <p className="font-medium">Не удалось открыть PDF</p>
-              <p className="mt-2 text-xs text-red-600/80">{error}</p>
-              <div className="mt-5 flex justify-center gap-3">
-                <Link
-                  href={`/books/${book.id}/read`}
-                  className="rounded-md bg-accent px-4 py-2 text-xs font-medium text-paper-soft transition hover:opacity-90"
-                >
-                  Открыть в текстовом ридере
-                </Link>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="rounded-md border border-border px-4 py-2 text-xs text-ink transition hover:bg-paper-soft"
-                >
-                  Повторить
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-col items-center">
-            <div
-              ref={pageContainerRef}
-              onMouseUp={handlePageSelectionEnd}
-              onTouchEnd={handlePageSelectionEnd}
-              onClick={handleContainerClick}
-              className="relative rounded-xs bg-white shadow-xl border border-border/70 select-text overflow-hidden"
-              style={{
-                display: isLoading || error ? "none" : "block",
-                width: pageDimensions?.width ? `${pageDimensions.width}px` : undefined,
-                height: pageDimensions?.height ? `${pageDimensions.height}px` : undefined,
-              }}
-            >
-              <canvas ref={canvasRef} className="block select-none" />
-              <div
-                ref={textLayerRef}
-                className="textLayer absolute inset-0 select-text"
-                style={{
-                  width: pageDimensions?.width ? `${pageDimensions.width}px` : undefined,
-                  height: pageDimensions?.height ? `${pageDimensions.height}px` : undefined,
-                  "--scale-factor": scale,
-                } as React.CSSProperties}
-              />
-              {/* Highlights visual overlay */}
-              <div className="absolute inset-0 pointer-events-none z-10">
-                {highlights.map((h) => {
-                  const rects = (h.rects as PdfHighlightRect[]) || [];
-                  const bgStyle =
-                    (h.type && highlightBgStyles[h.type]) ||
-                    "bg-amber-300/45 border-b border-amber-500/50";
-
-                  return (
-                    <React.Fragment key={h.id}>
-                      {rects.map((r, idx) => (
-                        <div
-                          key={`${h.id}-${idx}`}
-                          className={`absolute rounded-xs pointer-events-none transition-opacity mix-blend-multiply ${bgStyle}`}
-                          style={{
-                            left: `${r.x * 100}%`,
-                            top: `${r.y * 100}%`,
-                            width: `${r.width * 100}%`,
-                            height: `${r.height * 100}%`,
-                          }}
-                        />
-                      ))}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
+        {error && (
+          <div className="mx-auto mt-32 max-w-sm px-6 text-center">
+            <p className="font-serif text-lg text-ink">Не удалось открыть PDF</p>
+            <p className="mt-2 text-xs text-ink-muted">{error}</p>
+            <div className="mt-5 flex justify-center gap-3">
+              <button
+                onClick={() => {
+                  setError(null);
+                  setReloadKey((k) => k + 1);
+                }}
+                className="rounded-md bg-accent px-4 py-2 text-xs font-medium text-paper-soft hover:opacity-90"
+              >
+                Повторить
+              </button>
+              <Link
+                href={`/books/${book.id}`}
+                className="rounded-md border border-border px-4 py-2 text-xs text-ink hover:bg-paper-soft"
+              >
+                К книге
+              </Link>
             </div>
           </div>
-        </main>
+        )}
 
-        {/* Highlight creation and editing menu */}
-        <HighlightMenu
-          bookId={book.id}
-          selection={activeSelection}
-          onCustomSelectColor={handleSelectHighlightColor}
-          onCustomDelete={handleDeleteHighlight}
-          onClose={() => {
-            setActiveSelection(null);
-            setPendingHighlightData(null);
-            window.getSelection()?.removeAllRanges();
-          }}
-        />
+        {doc && pageWidth > 0 && (
+          <div
+            ref={pagesRef}
+            onMouseUp={handleSelectionEnd}
+            onTouchEnd={handleSelectionEnd}
+            onClick={handlePagesClick}
+            className="relative mx-auto flex w-max min-w-full flex-col items-center"
+            style={{ gap: PAGE_GAP, paddingTop: TOP_PADDING, paddingBottom: 48 }}
+          >
+            {Array.from({ length: numPages }, (_, i) => {
+              const pageNumber = i + 1;
+              return (
+                <PdfPage
+                  key={pageNumber}
+                  pdfDoc={doc.pdfDoc}
+                  pdfjs={doc.pdfjs}
+                  pageNumber={pageNumber}
+                  width={pageWidth}
+                  aspectRatio={pageRatios[pageNumber] ?? defaultRatio}
+                  isActive={pageNumber >= activeFirst && pageNumber <= activeLast}
+                  highlights={highlightsByPage[pageNumber] ?? EMPTY_HIGHLIGHTS}
+                  onAspectRatio={handleAspectRatio}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* Bottom Floating Quick Pagination on Mobile */}
-      <div className="flex items-center justify-between border-t border-border bg-paper-soft px-4 py-2 text-xs text-ink-muted sm:hidden">
-        <button
-          onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-          disabled={currentPage <= 1 || isLoading}
-          className="rounded px-3 py-1 bg-border/60 text-ink hover:bg-border active:scale-95 disabled:opacity-30"
-        >
-          Назад
-        </button>
-        <span>
-          Стр. {currentPage} из {numPages}
-        </span>
-        <button
-          onClick={() => setCurrentPage((p) => Math.min(p + 1, numPages))}
-          disabled={currentPage >= numPages || isLoading}
-          className="rounded px-3 py-1 bg-border/60 text-ink hover:bg-border active:scale-95 disabled:opacity-30"
-        >
-          Вперед
-        </button>
-      </div>
+      <HighlightMenu
+        bookId={book.id}
+        selection={activeSelection}
+        onCustomSelectColor={handleSelectHighlightColor}
+        onCustomDelete={handleDeleteHighlight}
+        onClose={() => {
+          setActiveSelection(null);
+          setPendingHighlightData(null);
+          window.getSelection()?.removeAllRanges();
+        }}
+      />
     </div>
   );
 }

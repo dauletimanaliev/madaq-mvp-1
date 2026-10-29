@@ -75,19 +75,35 @@ export async function listUserHighlights(
     where: whereClause,
     include: {
       book: { select: { title: true } },
-      chapter: { select: { number: true, title: true, content: true } },
+      chapter: { select: { number: true, title: true } },
     },
     orderBy: { createdAt: "desc" },
   });
 
+  // Older text highlights did not store their text. Load chapter content only
+  // for those, once per chapter, instead of every chapter's full text.
+  const chapterIdsNeedingText = [
+    ...new Set(
+      highlights
+        .filter((h) => !h.selectedText && h.chapterId && h.startPosition != null && h.endPosition != null)
+        .map((h) => h.chapterId as string)
+    ),
+  ];
+  const chapterContent = new Map<string, string>();
+  if (chapterIdsNeedingText.length > 0) {
+    const chapters = await prisma.chapter.findMany({
+      where: { id: { in: chapterIdsNeedingText } },
+      select: { id: true, content: true },
+    });
+    for (const c of chapters) chapterContent.set(c.id, c.content);
+  }
+
   return highlights.map((highlight) => {
+    const content = highlight.chapterId ? chapterContent.get(highlight.chapterId) : undefined;
     const selectedText =
       highlight.selectedText ||
-      (highlight.chapter && highlight.startPosition != null && highlight.endPosition != null
-        ? highlight.chapter.content.slice(
-            highlight.startPosition,
-            highlight.endPosition
-          )
+      (content && highlight.startPosition != null && highlight.endPosition != null
+        ? content.slice(highlight.startPosition, highlight.endPosition)
         : "");
 
     return {
@@ -154,6 +170,7 @@ export async function createHighlight(
       chapterId: input.chapterId,
       startPosition: input.startPosition,
       endPosition: input.endPosition,
+      selectedText: chapter.content.slice(input.startPosition, input.endPosition),
       type: input.type,
     },
   });
@@ -312,10 +329,11 @@ export async function updateEpubHighlightCfi(
 export async function listPdfHighlights(
   userId: string,
   bookId: string,
-  pageNumber: number
+  pageNumber?: number
 ): Promise<Highlight[]> {
   const highlights = await prisma.highlight.findMany({
-    where: { userId, bookId, pageNumber },
+    // Without a page number, return every PDF highlight of the book.
+    where: { userId, bookId, pageNumber: pageNumber ?? { not: null } },
     orderBy: { createdAt: "asc" },
   });
 

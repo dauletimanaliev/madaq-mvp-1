@@ -42,6 +42,15 @@ export async function getChaptersByBook(bookId: string): Promise<Chapter[]> {
   });
 }
 
+export async function countChaptersByBook(bookId: string): Promise<number> {
+  const decoded = decodeURIComponent(bookId);
+  return prisma.chapter.count({
+    where: {
+      OR: [{ bookId }, { bookId: decoded }],
+    },
+  });
+}
+
 export async function getChapterByNumber(
   bookId: string,
   number: number

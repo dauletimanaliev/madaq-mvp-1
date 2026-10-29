@@ -8,16 +8,26 @@ const globalForPrisma = globalThis as unknown as {
   prismaSchemaVersion: string | undefined;
 };
 
-const prismaSchemaVersion = "ingestion-pipeline-v2";
+const prismaSchemaVersion = "ingestion-pipeline-v4";
 
 function createPrismaClient() {
   // Connection Pool configuration (Standard v1.0 Section 4.1):
   // Formula: connections = ((core_count * 2) + effective_spindle_count)
   // Enforces connection_limit and pool_timeout on pooled connections
-  let databaseUrl = process.env.DATABASE_URL;
+  //
+  // In development the server is one long-running process far from the
+  // database, so use the session-mode pooler (DIRECT_URL): every query is a
+  // single round trip. The transaction-mode pooler (`pgbouncer=true`) wraps
+  // each query in BEGIN/DEALLOCATE/COMMIT, about 5 round trips per query.
+  // Serverless production keeps the transaction-mode pooler.
+  const useSessionPooler =
+    process.env.NODE_ENV === "development" && Boolean(process.env.DIRECT_URL);
+  let databaseUrl = useSessionPooler ? process.env.DIRECT_URL : process.env.DATABASE_URL;
   if (databaseUrl && !databaseUrl.includes("connection_limit")) {
     const separator = databaseUrl.includes("?") ? "&" : "?";
-    databaseUrl = `${databaseUrl}${separator}connection_limit=10&pool_timeout=20`;
+    // Session-mode connections are held for the process lifetime; keep it small.
+    const limit = useSessionPooler ? 5 : 10;
+    databaseUrl = `${databaseUrl}${separator}connection_limit=${limit}&pool_timeout=20`;
   }
 
   return new PrismaClient({

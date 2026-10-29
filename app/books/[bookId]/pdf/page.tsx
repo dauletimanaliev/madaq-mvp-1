@@ -2,6 +2,8 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getBookById } from "@/server/books/queries";
 import { PdfReader } from "@/components/reader/PdfReader";
+import { preconnect } from "react-dom";
+import { createSignedPdfUrl, getStorageOrigin } from "@/lib/storage/signed-pdf-url";
 
 export const dynamic = "force-dynamic";
 
@@ -75,5 +77,20 @@ export default async function BookPdfPage({
     );
   }
 
-  return <PdfReader book={book} pdfUrl={pdfUrl} initialPage={initialPage} />;
+  // Open the connection to storage while the page's JS is still loading.
+  preconnect(getStorageOrigin(), { crossOrigin: "anonymous" });
+
+  // Sign on the server so the browser can start downloading right away,
+  // instead of making an extra request after the page loads.
+  const signedUrl = await createSignedPdfUrl(book.storageS3Key!);
+
+  return (
+    <PdfReader
+      key={book.id}
+      book={book}
+      pdfUrl={signedUrl ?? pdfUrl}
+      fallbackUrl={pdfUrl}
+      initialPage={initialPage}
+    />
+  );
 }

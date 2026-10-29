@@ -22,6 +22,18 @@ export async function fetchPdfPageHighlights(
   }
 }
 
+export async function fetchPdfBookHighlights(
+  bookId: string
+): Promise<Highlight[]> {
+  try {
+    const userId = await getCurrentUserId();
+    return await listPdfHighlights(userId, bookId);
+  } catch (error) {
+    console.error("Failed to fetch PDF highlights:", error);
+    return [];
+  }
+}
+
 export async function savePdfHighlight(input: {
   bookId: string;
   pageNumber: number;
