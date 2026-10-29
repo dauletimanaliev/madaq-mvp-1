@@ -40,7 +40,7 @@ type LoadedDoc = {
   pdfjs: typeof import("pdfjs-dist");
 };
 
-const PAGE_GAP = 12; // px between pages
+const PAGE_GAP = 8; // px between pages
 const TOP_PADDING = 64; // keeps the first page clear of the header
 const MAX_FIT_WIDTH = 960; // page width at 100% on wide screens
 const MIN_ZOOM = 0.5;
@@ -769,16 +769,16 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
   const isLoading = !doc && !error;
 
   return (
-    <div className="relative flex h-dvh w-screen flex-col overflow-hidden bg-[#e9e6e1] text-ink select-none">
+    <div className="relative flex h-dvh w-screen flex-col overflow-hidden bg-white text-ink select-none">
       {/* Header: overlays the pages and hides while reading */}
       <header
-        className={`absolute inset-x-0 top-0 z-30 flex h-12 items-center gap-2 border-b border-border/60 bg-paper-soft/90 px-2 backdrop-blur-md transition-transform duration-200 sm:px-4 ${
+        className={`absolute inset-x-0 top-0 z-30 flex h-12 items-center gap-2 border-b border-black/[0.06] bg-white/95 px-2 backdrop-blur-md transition-transform duration-200 sm:px-4 ${
           chromeVisible || searchOpen ? "translate-y-0" : "-translate-y-full"
         }`}
       >
         <Link
           href={`/books/${book.id}`}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-border/60 hover:text-ink"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-neutral-100 hover:text-ink"
           title="Назад к книге"
           aria-label="Назад к книге"
         >
@@ -800,13 +800,13 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
                 value={pageDraft}
                 onChange={(e) => setPageDraft(e.target.value)}
                 onBlur={() => submitPageDraft()}
-                className="h-7 w-12 rounded border border-border bg-paper text-center font-mono text-xs text-ink focus:border-accent focus:outline-none"
+                className="h-7 w-12 rounded border border-neutral-200 bg-white text-center font-mono text-xs text-ink focus:border-accent focus:outline-none"
               />
             ) : (
               <button
                 type="button"
                 onClick={() => setPageDraft(String(currentPage))}
-                className="rounded px-1.5 py-1 font-mono tabular-nums text-ink hover:bg-border/60"
+                className="rounded px-1.5 py-1 font-mono tabular-nums text-ink hover:bg-neutral-100"
                 title="Перейти к странице"
               >
                 {currentPage}
@@ -819,7 +819,7 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
         <button
           onClick={() => (searchOpen ? setSearchOpen(false) : openSearch())}
           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors ${
-            searchOpen ? "bg-accent text-paper-soft" : "text-ink-muted hover:bg-border/60 hover:text-ink"
+            searchOpen ? "bg-accent text-paper-soft" : "text-ink-muted hover:bg-neutral-100 hover:text-ink"
           }`}
           title="Поиск в книге (Cmd+F)"
           aria-label="Поиск в книге"
@@ -831,14 +831,14 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
       </header>
 
       {toastMessage && (
-        <div className="absolute top-16 left-1/2 z-40 -translate-x-1/2 rounded-full border border-border bg-paper-soft/95 px-4 py-2 text-xs text-ink shadow-lg backdrop-blur-md">
+        <div className="absolute top-16 left-1/2 z-40 -translate-x-1/2 rounded-full border border-neutral-200 bg-white/95 px-4 py-2 text-xs text-ink shadow-lg backdrop-blur-md">
           {toastMessage}
         </div>
       )}
 
       {/* Search drawer */}
       {searchOpen && (
-        <aside className="absolute top-12 bottom-0 left-0 z-30 flex w-full flex-col border-r border-border bg-paper-soft shadow-2xl sm:w-80">
+        <aside className="absolute top-12 bottom-0 left-0 z-30 flex w-full flex-col border-r border-neutral-200 bg-white shadow-2xl sm:w-80">
           <div className="flex items-center gap-2 p-3">
             <div className="relative flex-1">
               <input
@@ -847,11 +847,11 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Слово или фраза…"
-                className="w-full rounded-md border border-border bg-paper py-2 pr-3 pl-8 text-sm text-ink placeholder:text-ink-muted focus:border-accent focus:outline-none"
+                className="w-full rounded-md border border-neutral-200 bg-white py-2 pr-3 pl-8 text-sm text-ink placeholder:text-ink-muted focus:border-accent focus:outline-none"
               />
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 text-ink-muted">
                 {isSearching ? (
-                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-accent" />
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-neutral-200 border-t-accent" />
                 ) : (
                   <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -861,7 +861,7 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
             </div>
             <button
               onClick={() => setSearchOpen(false)}
-              className="rounded-md p-1.5 text-ink-muted hover:bg-border/60 hover:text-ink"
+              className="rounded-md p-1.5 text-ink-muted hover:bg-neutral-100 hover:text-ink"
               aria-label="Закрыть поиск"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -884,7 +884,7 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
                     className={`flex flex-col items-start rounded-lg border p-2.5 text-left transition-colors ${
                       currentPage === res.pageNumber
                         ? "border-accent bg-accent/10"
-                        : "border-border bg-paper hover:border-accent/40"
+                        : "border-neutral-200 bg-white hover:border-accent/40"
                     }`}
                   >
                     <span className="text-[11px] font-medium text-accent">Страница {res.pageNumber}</span>
@@ -905,7 +905,7 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
       >
         {isLoading && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-ink-muted">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" />
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-200 border-t-accent" />
             <p className="text-sm">Открываем книгу…</p>
           </div>
         )}
@@ -926,7 +926,7 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
               </button>
               <Link
                 href={`/books/${book.id}`}
-                className="rounded-md border border-border px-4 py-2 text-xs text-ink hover:bg-paper-soft"
+                className="rounded-md border border-neutral-200 px-4 py-2 text-xs text-ink hover:bg-white"
               >
                 К книге
               </Link>

@@ -134,7 +134,7 @@ function PdfPageImpl({
   return (
     <div
       data-pdf-page={pageNumber}
-      className="relative mx-auto bg-white shadow-md ring-1 ring-black/5 select-text"
+      className="relative mx-auto bg-white select-text"
       style={{ width, height }}
     >
       {!isRendered && (
