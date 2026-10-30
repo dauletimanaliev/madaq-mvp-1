@@ -79,22 +79,19 @@ export async function POST(
 
     const now = new Date();
 
-    // 1. Upsert into user_library (ТЗ §1, §5)
-    await prisma.userLibrary.upsert({
-      where: { userId_bookId: { userId, bookId } },
-      create: {
-        userId,
-        bookId,
-        lastReadPage: page,
-        progressPct,
-        lastReadAt: now,
-      },
-      update: {
+    // Update progress only for a book already in the user's library;
+    // saving progress must never add a book to someone's library.
+    const updated = await prisma.userLibrary.updateMany({
+      where: { userId, bookId },
+      data: {
         lastReadPage: page,
         progressPct,
         lastReadAt: now,
       },
     });
+    if (updated.count === 0) {
+      return NextResponse.json({ error: "Книга не найдена" }, { status: 404 });
+    }
 
     return NextResponse.json({
       success: true,

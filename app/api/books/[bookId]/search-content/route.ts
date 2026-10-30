@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import { requireBookAccess } from "@/lib/auth/book-access";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,9 @@ export async function GET(
 ) {
   try {
     const { bookId: rawBookId } = await params;
-    const bookId = decodeURIComponent(rawBookId);
+    const access = await requireBookAccess(rawBookId);
+    if (!access.ok) return access.response;
+    const bookId = access.book.id;
 
     const { searchParams } = new URL(request.url);
     const q = (searchParams.get("q") || "").trim();

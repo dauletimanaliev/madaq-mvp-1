@@ -138,7 +138,8 @@ async function openPdfByRanges(
   pdfjs: PdfJs,
   url: string,
   knownLength: number | null | undefined,
-  signal: AbortSignal
+  signal: AbortSignal,
+  worker: InstanceType<PdfJs["PDFWorker"]>
 ) {
   const fetchRange = (begin: number, end: number) =>
     fetch(url, { headers: { Range: `bytes=${begin}-${end - 1}` }, signal }).then((r) => {
@@ -211,6 +212,7 @@ async function openPdfByRanges(
   }
 
   const loadingTask = pdfjs.getDocument({
+    worker,
     range: transport,
     rangeChunkSize: RANGE_CHUNK_SIZE,
     disableAutoFetch: true,
@@ -326,22 +328,31 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
   // 2. Load the document with range requests (no full download up front).
   useEffect(() => {
     let cancelled = false;
-    let loaded: PDFDocumentProxy | null = null;
+    // Destroying the loading task also destroys the document once loaded.
+    let task: { destroy: () => Promise<void>; promise: Promise<PDFDocumentProxy> } | null = null;
     const abort = new AbortController();
+    let worker: { destroy: () => void } | null = null;
 
     (async () => {
       try {
         const pdfjs = await import("pdfjs-dist");
         pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+        if (cancelled) return;
+        // Own the worker: if we cancel before it starts, PDF.js rejects its
+        // ready promise with nobody listening ("Worker was destroyed").
+        const pdfWorker = new pdfjs.PDFWorker();
+        pdfWorker.promise.catch(() => {});
+        worker = pdfWorker;
 
         const isCrossOrigin = new URL(activePdfUrl, window.location.href).origin !== window.location.origin;
         const byRanges = isCrossOrigin
-          ? await openPdfByRanges(pdfjs, activePdfUrl, book.fileSizeBytes, abort.signal)
+          ? await openPdfByRanges(pdfjs, activePdfUrl, book.fileSizeBytes, abort.signal, pdfWorker)
           : null;
         const loadingTask =
           byRanges ??
           // Same-origin proxy exposes all headers, so PDF.js handles ranges itself.
           pdfjs.getDocument({
+            worker: pdfWorker,
             url: activePdfUrl,
             rangeChunkSize: RANGE_CHUNK_SIZE,
             disableAutoFetch: true,
@@ -349,12 +360,14 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
             cMapUrl: CMAP_URL,
             cMapPacked: true,
           });
+        // Cancelling rejects the task's promise; nobody awaits it then.
+        loadingTask.promise.catch(() => {});
+        task = loadingTask;
         if (cancelled) {
-          loadingTask.destroy();
+          void loadingTask.destroy();
           return;
         }
         const pdfDoc = await loadingTask.promise;
-        loaded = pdfDoc;
         if (cancelled) return;
 
         const first = await pdfDoc.getPage(1);
@@ -383,7 +396,8 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
     return () => {
       cancelled = true;
       abort.abort();
-      loaded?.destroy();
+      void task?.destroy();
+      worker?.destroy();
     };
   }, [activePdfUrl, fallbackUrl, reloadKey, book.fileSizeBytes]);
 

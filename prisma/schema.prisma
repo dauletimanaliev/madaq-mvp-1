@@ -239,7 +239,12 @@ model UploadJob {
   bookId String? @unique @map("book_id") // появляется после успешной обработки
   book   Book?   @relation(fields: [bookId], references: [id])
 
+  // Кто загрузил и когда подтвердил право загружать файл
+  userId            String?   @map("user_id")
+  rightsConfirmedAt DateTime? @map("rights_confirmed_at")
+
   @@index([status])
+  @@index([userId])
   @@map("upload_jobs")
 }
 

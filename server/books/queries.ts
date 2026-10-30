@@ -1,10 +1,25 @@
 import { prisma } from "@/lib/db/prisma";
 import type { Book } from "@/lib/types";
 
-export async function getBooks(): Promise<Book[]> {
-  return prisma.book.findMany({
-    include: { author: true },
+/** Books in the user's personal library, most recently added first. */
+export async function getLibraryBooks(userId: string): Promise<Book[]> {
+  const entries = await prisma.userLibrary.findMany({
+    where: { userId },
+    include: { book: { include: { author: true } } },
     orderBy: { createdAt: "desc" },
+  });
+  return entries.map((e) => e.book);
+}
+
+/** The book, only if it is in the user's library; null otherwise. */
+export async function getBookForUser(userId: string, id: string): Promise<Book | null> {
+  const decoded = decodeURIComponent(id);
+  return prisma.book.findFirst({
+    where: {
+      OR: [{ id }, { id: decoded }],
+      userLibraries: { some: { userId } },
+    },
+    include: { author: true },
   });
 }
 
@@ -22,9 +37,9 @@ export async function getBookById(id: string): Promise<Book | null> {
  * Fast fuzzy search using PostgreSQL pg_trgm extension and GIN indexes
  * Searches across book titles and author names with typo tolerance.
  */
-export async function searchBooks(query: string): Promise<Book[]> {
+export async function searchBooks(userId: string, query: string): Promise<Book[]> {
   const q = query.trim();
-  if (!q) return getBooks();
+  if (!q) return getLibraryBooks(userId);
 
   try {
     const results = await prisma.$queryRaw<
@@ -54,10 +69,14 @@ export async function searchBooks(query: string): Promise<Book[]> {
              a.id as author_id, a.name as author_name, a.bio as author_bio, a.photo_url as author_photo
       FROM books b
       JOIN authors a ON b.author_id = a.id
-      WHERE b.title % ${q}
+      WHERE EXISTS (
+              SELECT 1 FROM user_library ul
+              WHERE ul.book_id = b.id AND ul.user_id = ${userId}
+            )
+        AND (b.title % ${q}
          OR a.name % ${q}
          OR b.title ILIKE ${"%" + q + "%"}
-         OR a.name ILIKE ${"%" + q + "%"}
+         OR a.name ILIKE ${"%" + q + "%"})
       ORDER BY GREATEST(similarity(b.title, ${q}), similarity(a.name, ${q})) DESC
       LIMIT 50;
     `;
@@ -87,6 +106,7 @@ export async function searchBooks(query: string): Promise<Book[]> {
     console.error("pg_trgm search error, falling back to standard prisma:", err);
     return prisma.book.findMany({
       where: {
+        userLibraries: { some: { userId } },
         OR: [
           { title: { contains: q, mode: "insensitive" } },
           { author: { name: { contains: q, mode: "insensitive" } } },

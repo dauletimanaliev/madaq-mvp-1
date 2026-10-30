@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { getBookById } from "@/server/books/queries";
+import { getBookForUser } from "@/server/books/queries";
 import { getChapterMetrics, getChapterByNumber } from "@/server/chapters/queries";
 import { getProgress } from "@/server/progress/queries";
 import { listHighlights } from "@/server/highlights/queries";
@@ -22,7 +22,7 @@ export default async function ReadPage({
   const userId = await getCurrentUserId();
 
   const [book, chapterMetrics, savedProgress] = await Promise.all([
-    getBookById(bookId),
+    getBookForUser(userId, bookId),
     getChapterMetrics(bookId),
     getProgress(userId, bookId),
   ]);

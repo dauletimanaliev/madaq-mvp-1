@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { getBookById } from "@/server/books/queries";
+import { getBookForUser } from "@/server/books/queries";
+import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { countChaptersByBook } from "@/server/chapters/queries";
 import { BookHero } from "@/components/book/BookHero";
 
@@ -12,8 +13,9 @@ export default async function BookPage({
 }) {
   const { bookId: rawBookId } = await params;
   const bookId = decodeURIComponent(rawBookId);
+  const userId = await getCurrentUserId();
   const [book, chapterCount] = await Promise.all([
-    getBookById(bookId),
+    getBookForUser(userId, bookId),
     countChaptersByBook(bookId),
   ]);
   if (!book) notFound();

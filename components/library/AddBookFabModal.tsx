@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import { getBookReaderUrl } from "@/lib/books/reader-url";
+import { MAX_UPLOAD_MB, uploadExtension } from "@/lib/books/upload-limits";
 
 export function openAddBookModal() {
   if (typeof window !== "undefined") {
@@ -28,8 +29,9 @@ type UploadState =
       chaptersCount: number;
       coverUrl?: string | null;
       contentFormat?: string | null;
+      isScanned?: boolean;
     }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; needsLogin?: boolean };
 
 const ACCEPTED_TYPES = [
   "application/pdf",
@@ -38,8 +40,7 @@ const ACCEPTED_TYPES = [
   "text/markdown",
   "application/json",
 ];
-const ACCEPTED_EXTENSIONS = [".pdf", ".epub", ".txt", ".md", ".json"];
-const MAX_SIZE_MB = 50;
+const MAX_SIZE_MB = MAX_UPLOAD_MB;
 
 export function AddBookFabModal() {
   const router = useRouter();
@@ -47,6 +48,7 @@ export function AddBookFabModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [state, setState] = useState<UploadState>({ status: "idle" });
+  const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Allow triggering modal from external buttons (e.g. mobile center nav button)
@@ -80,14 +82,19 @@ export function AddBookFabModal() {
   }, [isOpen]);
 
   const isValidFile = useCallback((file: File) => {
-    if (file.type && ACCEPTED_TYPES.includes(file.type)) return true;
-    return ACCEPTED_EXTENSIONS.some((ext) =>
-      file.name.toLowerCase().endsWith(ext)
-    );
+    if (uploadExtension(file.name)) return true;
+    return Boolean(file.type && ACCEPTED_TYPES.includes(file.type));
   }, []);
 
   const uploadFile = useCallback(
     async (file: File) => {
+      if (!rightsConfirmed) {
+        setState({
+          status: "error",
+          message: "Сначала отметьте, что у вас есть право загружать этот файл.",
+        });
+        return;
+      }
       if (!isValidFile(file)) {
         setState({
           status: "error",
@@ -135,8 +142,24 @@ export function AddBookFabModal() {
           const signRes = await fetch("/api/books/upload/sign", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileName: file.name, fileSize: file.size }),
+            body: JSON.stringify({
+              fileName: file.name,
+              fileSize: file.size,
+              rightsConfirmed: true,
+            }),
           });
+
+          // The server refused (not signed in, limit, size, format): show why.
+          if (signRes.status >= 400 && signRes.status < 500) {
+            const err = (await signRes.json().catch(() => ({}))) as { error?: string };
+            clearTimeout(timer1);
+            setState({
+              status: "error",
+              message: err.error || "Не удалось загрузить книгу.",
+              needsLogin: signRes.status === 401,
+            });
+            return;
+          }
 
           if (signRes.ok) {
             const signData = (await signRes.json()) as {
@@ -158,6 +181,7 @@ export function AddBookFabModal() {
                 uploadPayload = JSON.stringify({
                   storagePath: signData.storagePath,
                   fileName: file.name,
+                  rightsConfirmed: true,
                 });
                 uploadHeaders = { "Content-Type": "application/json" };
               } else {
@@ -182,6 +206,7 @@ export function AddBookFabModal() {
           }
           const formData = new FormData();
           formData.append("file", file);
+          formData.append("rightsConfirmed", "true");
           uploadPayload = formData;
         }
 
@@ -202,6 +227,7 @@ export function AddBookFabModal() {
           chaptersCount?: number;
           coverUrl?: string | null;
           contentFormat?: string | null;
+          isScanned?: boolean;
         } = {};
         try {
           data = JSON.parse(resText);
@@ -217,6 +243,7 @@ export function AddBookFabModal() {
           setState({
             status: "error",
             message: data.error || "Не удалось загрузить книгу. Попробуйте ещё раз.",
+            needsLogin: response.status === 401,
           });
           return;
         }
@@ -235,6 +262,7 @@ export function AddBookFabModal() {
               : file.name.toLowerCase().endsWith(".pdf")
               ? "PDF"
               : "TEXT"),
+          isScanned: data.isScanned,
         });
 
         // Automatically refresh library in background so the book is there immediately
@@ -250,7 +278,7 @@ export function AddBookFabModal() {
         });
       }
     },
-    [isValidFile, router]
+    [isValidFile, router, rightsConfirmed]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -479,14 +507,21 @@ export function AddBookFabModal() {
                       <p className="mt-1 text-sm font-medium text-ink-muted">
                         {state.author}
                       </p>
-                      <p className="mt-2 text-xs text-ink-muted">
-                        {state.chaptersCount}{" "}
-                        {state.chaptersCount === 1
-                          ? "глава"
-                          : state.chaptersCount < 5
-                          ? "главы"
-                          : "глав"}
-                      </p>
+                      {state.isScanned ? (
+                        <p className="mt-2 text-xs text-ink-muted">
+                          Это скан: страницы откроются как в оригинале, но поиск и выделение текста недоступны.
+                        </p>
+                      ) : state.contentFormat === "TEXT" && state.chaptersCount > 0 ? (
+                        <p className="mt-2 text-xs text-ink-muted">
+                          {state.chaptersCount}{" "}
+                          {state.chaptersCount % 10 === 1 && state.chaptersCount % 100 !== 11
+                            ? "глава"
+                            : [2, 3, 4].includes(state.chaptersCount % 10) &&
+                              ![12, 13, 14].includes(state.chaptersCount % 100)
+                            ? "главы"
+                            : "глав"}
+                        </p>
+                      ) : null}
 
                       <div className="mt-5 flex flex-col sm:flex-row gap-2.5">
                         <button
@@ -604,6 +639,15 @@ export function AddBookFabModal() {
                     {state.status === "error" && (
                       <div className="mt-4 rounded-xl bg-red-100/90 dark:bg-red-950/40 border border-red-300 dark:border-red-900/50 px-4 py-3 text-xs text-red-700 dark:text-red-300">
                         <span>{state.message}</span>
+                        {state.needsLogin && (
+                          <a
+                            href="/login"
+                            onClick={(e) => e.stopPropagation()}
+                            className="ml-3 font-semibold underline hover:no-underline"
+                          >
+                            Войти
+                          </a>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => {
@@ -617,6 +661,22 @@ export function AddBookFabModal() {
                       </div>
                     )}
                   </div>
+
+                  <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl px-1 text-left text-xs leading-relaxed text-ink-muted">
+                    <input
+                      type="checkbox"
+                      checked={rightsConfirmed}
+                      onChange={(e) => {
+                        setRightsConfirmed(e.target.checked);
+                        if (e.target.checked && state.status === "error") resetUpload();
+                      }}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
+                    />
+                    <span>
+                      Я подтверждаю, что у меня есть право загружать этот файл: это моя книга или
+                      копия для личного чтения. Книга будет видна только мне.
+                    </span>
+                  </label>
                 </div>
               )}
             </div>

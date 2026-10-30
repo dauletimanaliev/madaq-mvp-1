@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBookById } from "@/server/books/queries";
+import { requireBookAccess } from "@/lib/auth/book-access";
 import { createSignedPdfUrl, SIGNED_URL_TTL_SECONDS } from "@/lib/storage/signed-pdf-url";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +15,11 @@ export async function GET(
 ) {
   try {
     const { bookId: rawBookId } = await params;
-    const bookId = decodeURIComponent(rawBookId);
-    const book = await getBookById(bookId);
+    const access = await requireBookAccess(rawBookId);
+    if (!access.ok) return access.response;
+    const book = access.book;
 
-    if (!book || !book.storageS3Key) {
+    if (!book.storageS3Key) {
       return NextResponse.json(
         { error: "PDF не найден или не сохранён в хранилище" },
         { status: 404 }

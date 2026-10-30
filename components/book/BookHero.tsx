@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { Book } from "@/lib/types";
 import { getBookReaderUrl } from "@/lib/books/reader-url";
+import { RemoveBookButton } from "./RemoveBookButton";
 
 export function BookHero({
   book,
@@ -36,8 +37,15 @@ export function BookHero({
           <p className="max-w-md text-ink-muted">{book.description}</p>
         )}
         <p className="text-sm text-ink-muted">
-          {chapterCount} {chapterCount === 1 ? "глава" : "глав"}
-          {book.totalPages ? ` · ${book.totalPages} стр.` : ""}
+          {[
+            book.contentFormat === "TEXT" && chapterCount > 0
+              ? `${chapterCount} ${chapterCount === 1 ? "глава" : "глав"}`
+              : null,
+            book.totalPages ? `${book.totalPages} стр.` : null,
+            book.contentFormat !== "TEXT" ? book.contentFormat : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <Link
@@ -75,6 +83,7 @@ export function BookHero({
               EPUB ридер
             </Link>
           )}
+          <RemoveBookButton bookId={book.id} title={book.title} />
         </div>
       </div>
     </div>

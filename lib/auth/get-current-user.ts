@@ -19,3 +19,18 @@ export async function getCurrentUserId(): Promise<string> {
 
   return session.user.id;
 }
+
+/**
+ * The signed-in user's id, or null for guests. In development a missing
+ * session falls back to "demo_user", like getCurrentUserId.
+ */
+export async function getOptionalUserId(): Promise<string | null> {
+  let session = null;
+  try {
+    session = await auth();
+  } catch {
+    session = null;
+  }
+  if (session?.user?.id) return session.user.id;
+  return process.env.NODE_ENV === "development" ? "demo_user" : null;
+}

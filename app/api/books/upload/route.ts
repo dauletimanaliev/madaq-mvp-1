@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { renderPageAsImage, extractText, getMeta } from "unpdf";
-import { auth } from "@/auth";
+import { getOptionalUserId } from "@/lib/auth/get-current-user";
+import {
+  MAX_BOOKS_PER_USER,
+  MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_MB,
+  TEMP_UPLOAD_BUCKET,
+  uploadExtension,
+} from "@/lib/books/upload-limits";
 import { prisma } from "@/lib/db/prisma";
 import { parseBookText, normalizeContent } from "@/lib/books/parser";
 import type { ParsedBook } from "@/lib/books/parser";
@@ -439,13 +446,13 @@ async function linkBookToUserLibrary(
 
 // ─── Main POST handler ────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
-  let session = null;
-  try {
-    session = await auth();
-  } catch {
-    session = null;
+  const userId = await getOptionalUserId();
+  if (!userId) {
+    return NextResponse.json(
+      { error: "Войдите, чтобы загружать книги" },
+      { status: 401 }
+    );
   }
-  const userId = session?.user?.id;
   const supabaseUrl =
     process.env.SUPABASE_URL || "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -453,6 +460,7 @@ export async function POST(request: NextRequest) {
   let fileBuffer: Buffer;
   let fileName: string;
   let tempStoragePathToDelete: string | null = null;
+  let rightsConfirmed = false;
 
   const contentType = request.headers.get("content-type") || "";
 
@@ -460,13 +468,21 @@ export async function POST(request: NextRequest) {
     if (contentType.includes("application/json")) {
       const json = await request.json().catch(() => ({}));
       const { storagePath, fileName: passedFileName } = json;
+      rightsConfirmed = json.rightsConfirmed === true;
 
-      if (!storagePath || typeof storagePath !== "string") {
+      // Only the user's own temporary upload can be processed.
+      if (
+        !storagePath ||
+        typeof storagePath !== "string" ||
+        !storagePath.startsWith(`temp-uploads/${userId}/`) ||
+        storagePath.includes("..")
+      ) {
         return NextResponse.json(
           { error: "Не указан путь к файлу" },
           { status: 400 }
         );
       }
+      tempStoragePathToDelete = storagePath;
 
       if (!serviceRoleKey) {
         return NextResponse.json(
@@ -477,7 +493,7 @@ export async function POST(request: NextRequest) {
 
       // Download from Supabase Storage (internal fetch, completely bypassing Vercel 4.5MB request limit!)
       const downloadRes = await fetch(
-        `${supabaseUrl}/storage/v1/object/book-covers/${storagePath}`,
+        `${supabaseUrl}/storage/v1/object/${TEMP_UPLOAD_BUCKET}/${storagePath}`,
         {
           headers: {
             authorization: `Bearer ${serviceRoleKey}`,
@@ -496,25 +512,41 @@ export async function POST(request: NextRequest) {
       const arrayBuf = await downloadRes.arrayBuffer();
       fileBuffer = Buffer.from(arrayBuf);
       fileName = passedFileName || storagePath.split("/").pop() || "book.pdf";
-      tempStoragePathToDelete = storagePath;
     } else {
       const formData = await request.formData();
       const file = formData.get("file") as File | null;
+      rightsConfirmed = formData.get("rightsConfirmed") === "true";
 
       if (!file) {
         return NextResponse.json({ error: "Файл не загружен" }, { status: 400 });
       }
 
-      if (file.size > 50 * 1024 * 1024) {
-        return NextResponse.json(
-          { error: "Файл слишком большой (макс. 50 МБ)" },
-          { status: 400 }
-        );
-      }
 
       const arrayBuffer = await file.arrayBuffer();
       fileBuffer = Buffer.from(arrayBuffer);
       fileName = file.name;
+    }
+
+    if (fileBuffer.length === 0) {
+      return NextResponse.json({ error: "Файл пустой" }, { status: 400 });
+    }
+    if (fileBuffer.length > MAX_UPLOAD_BYTES) {
+      return NextResponse.json(
+        { error: `Файл слишком большой (макс. ${MAX_UPLOAD_MB} МБ)` },
+        { status: 413 }
+      );
+    }
+    if (!uploadExtension(fileName)) {
+      return NextResponse.json(
+        { error: "Этот формат не поддерживается. Загрузите PDF, EPUB, TXT, MD или JSON." },
+        { status: 400 }
+      );
+    }
+    if (!rightsConfirmed) {
+      return NextResponse.json(
+        { error: "Подтвердите, что у вас есть право загружать этот файл" },
+        { status: 400 }
+      );
     }
 
     const ext = fileName.split(".").pop()?.toLowerCase();
@@ -545,6 +577,23 @@ export async function POST(request: NextRequest) {
       .update(fileBuffer)
       .digest("hex");
 
+    // Лимит книг: проверяем до тяжёлой обработки
+    const [bookCount, existingEntry] = await Promise.all([
+      prisma.userLibrary.count({ where: { userId } }),
+      prisma.userLibrary.findFirst({
+        where: { userId, book: { fileHashSha256 } },
+        select: { id: true },
+      }),
+    ]);
+    if (!existingEntry && bookCount >= MAX_BOOKS_PER_USER) {
+      return NextResponse.json(
+        {
+          error: `В библиотеке уже ${MAX_BOOKS_PER_USER} книг — это максимум. Удалите ненужные, чтобы добавить новые.`,
+        },
+        { status: 403 }
+      );
+    }
+
     // 3. Дедупликация: проверяем, загружался ли уже такой файл (ТЗ §1)
     const existingBook = await prisma.book.findUnique({
       where: { fileHashSha256 },
@@ -562,7 +611,7 @@ export async function POST(request: NextRequest) {
       // Удаляем временный файл из хранилища, если он был загружен
       if (tempStoragePathToDelete && serviceRoleKey) {
         fetch(
-          `${supabaseUrl}/storage/v1/object/book-covers/${tempStoragePathToDelete}`,
+          `${supabaseUrl}/storage/v1/object/${TEMP_UPLOAD_BUCKET}/${tempStoragePathToDelete}`,
           {
             method: "DELETE",
             headers: {
@@ -599,6 +648,8 @@ export async function POST(request: NextRequest) {
         data: {
           fileName,
           fileSize: fileBuffer.length,
+          userId,
+          rightsConfirmedAt: new Date(),
           status: "PROCESSING",
           step: 1,
           stepText: "Файл валидирован, извлечение метаданных и обложки...",
@@ -613,7 +664,7 @@ export async function POST(request: NextRequest) {
       // Удаляем временный файл из хранилища, если он был загружен
       if (tempStoragePathToDelete && serviceRoleKey) {
         fetch(
-          `${supabaseUrl}/storage/v1/object/book-covers/${tempStoragePathToDelete}`,
+          `${supabaseUrl}/storage/v1/object/${TEMP_UPLOAD_BUCKET}/${tempStoragePathToDelete}`,
           {
             method: "DELETE",
             headers: {
@@ -682,6 +733,18 @@ export async function POST(request: NextRequest) {
       }
 
       const epubStorageKey = await uploadEpubToSupabase(fileHashSha256, fileBuffer);
+      if (!epubStorageKey) {
+        if (uploadJob) {
+          await prisma.uploadJob.update({
+            where: { id: uploadJob.id },
+            data: { status: "FAILED", errorLog: "Не удалось сохранить EPUB в хранилище" },
+          }).catch(() => {});
+        }
+        return NextResponse.json(
+          { error: "Не удалось сохранить файл. Попробуйте ещё раз." },
+          { status: 502 }
+        );
+      }
 
       // Поиск или создание автора
       let author = await prisma.author.findFirst({
@@ -837,7 +900,7 @@ export async function POST(request: NextRequest) {
     // Clean up temporary uploaded file from Supabase in background
     if (tempStoragePathToDelete && serviceRoleKey) {
       fetch(
-        `${supabaseUrl}/storage/v1/object/book-covers/${tempStoragePathToDelete}`,
+        `${supabaseUrl}/storage/v1/object/${TEMP_UPLOAD_BUCKET}/${tempStoragePathToDelete}`,
         {
           method: "DELETE",
           headers: {
@@ -848,21 +911,24 @@ export async function POST(request: NextRequest) {
       ).catch(() => {});
     }
 
-    if (!rawText || rawText.trim().length < 50) {
+    // A PDF without a text layer (a scan) is still readable as the original
+    // pages; it just has no text search. Other formats need text.
+    const isScannedPdf = isPdf && (!rawText || rawText.trim().length < 50);
+
+    if (!isScannedPdf && (!rawText || rawText.trim().length < 50)) {
       if (uploadJob) {
         await prisma.uploadJob.update({
           where: { id: uploadJob.id },
           data: {
             status: "FAILED",
-            errorLog: "Не удалось извлечь текст (отсканированный PDF)",
+            errorLog: "Не удалось извлечь текст",
           },
         }).catch(() => {});
       }
 
       return NextResponse.json(
         {
-          error:
-            "Не удалось извлечь текст из файла. Возможно, PDF содержит только отсканированные изображения без текстового слоя.",
+          error: "В файле не нашлось текста. Проверьте, что файл не пустой.",
         },
         { status: 422 }
       );
@@ -901,11 +967,14 @@ export async function POST(request: NextRequest) {
           })),
         };
       }
+    } else if (isScannedPdf) {
+      parsedBook = { title, chapters: [] };
     } else {
       parsedBook = parseBookText(rawText, title);
     }
 
-    if (!parsedBook.chapters || parsedBook.chapters.length === 0) {
+    // The PDF reader shows original pages, so a PDF does not need chapters.
+    if (!isPdf && (!parsedBook.chapters || parsedBook.chapters.length === 0)) {
       if (uploadJob) {
         await prisma.uploadJob.update({
           where: { id: uploadJob.id },
@@ -957,6 +1026,18 @@ export async function POST(request: NextRequest) {
     let storageS3Key: string | null = null;
     if (isPdf) {
       storageS3Key = await uploadPdfToSupabase(fileHashSha256, finalPdfBuffer);
+      if (!storageS3Key) {
+        if (uploadJob) {
+          await prisma.uploadJob.update({
+            where: { id: uploadJob.id },
+            data: { status: "FAILED", errorLog: "Не удалось сохранить PDF в хранилище" },
+          }).catch(() => {});
+        }
+        return NextResponse.json(
+          { error: "Не удалось сохранить файл. Попробуйте ещё раз." },
+          { status: 502 }
+        );
+      }
     }
 
     // Create book record with Ingestion Pipeline fields
@@ -970,7 +1051,7 @@ export async function POST(request: NextRequest) {
         authorId: author.id,
         fileHashSha256,
         fileSizeBytes: finalPdfBuffer.length,
-        totalPages: totalPages > 0 ? totalPages : parsedBook.chapters.length,
+        totalPages: totalPages > 0 ? totalPages : parsedBook.chapters.length || null,
         isLinearized,
         storageS3Key,
         contentFormat: isPdf ? "PDF" : "TEXT",
@@ -981,7 +1062,7 @@ export async function POST(request: NextRequest) {
     await linkBookToUserLibrary(userId, book.id);
 
     // Create chapters
-    await prisma.chapter.createMany({
+    if (parsedBook.chapters.length > 0) await prisma.chapter.createMany({
       data: parsedBook.chapters.map((ch) => ({
         bookId: book.id,
         number: ch.number,
@@ -1034,6 +1115,8 @@ export async function POST(request: NextRequest) {
       coverUrl,
       fileHashSha256,
       totalPages: book.totalPages,
+      contentFormat: book.contentFormat,
+      isScanned: isScannedPdf,
     });
   } catch (error) {
     console.error("Book upload error:", error);
@@ -1046,5 +1129,16 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     );
+  } finally {
+    // Always remove the raw upload; the processed copy lives under books/.
+    if (tempStoragePathToDelete && serviceRoleKey) {
+      await fetch(
+        `${supabaseUrl}/storage/v1/object/${TEMP_UPLOAD_BUCKET}/${tempStoragePathToDelete}`,
+        {
+          method: "DELETE",
+          headers: { authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey },
+        }
+      ).catch(() => {});
+    }
   }
 }

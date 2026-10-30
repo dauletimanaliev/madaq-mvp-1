@@ -1,10 +1,13 @@
-import { getBooks } from "@/server/books/queries";
+import Link from "next/link";
+import { getLibraryBooks } from "@/server/books/queries";
+import { getOptionalUserId } from "@/lib/auth/get-current-user";
 import { BookListWithSearch } from "@/components/library/BookListWithSearch";
 
 export const dynamic = "force-dynamic";
 
 export default async function LibraryPage() {
-  const books = await getBooks();
+  const userId = await getOptionalUserId();
+  const books = userId ? await getLibraryBooks(userId) : [];
 
   return (
     <div className="relative min-h-screen">
@@ -14,7 +17,24 @@ export default async function LibraryPage() {
           Что читаем сегодня
         </h1>
 
-        <BookListWithSearch initialBooks={books} />
+        {userId ? (
+          <BookListWithSearch initialBooks={books} />
+        ) : (
+          <div className="mt-8 rounded-xl border border-border bg-paper-soft px-6 py-10 text-center">
+            <p className="text-base font-medium text-ink">
+              Войдите, чтобы открыть свою библиотеку
+            </p>
+            <p className="mt-1 text-sm text-ink-muted">
+              Загружайте свои PDF и EPUB, читайте и делайте заметки. Ваши книги видите только вы.
+            </p>
+            <Link
+              href="/login"
+              className="mt-5 inline-block rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-paper-soft transition hover:opacity-90"
+            >
+              Войти
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );

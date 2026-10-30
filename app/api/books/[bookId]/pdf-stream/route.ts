@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBookById } from "@/server/books/queries";
+import { requireBookAccess } from "@/lib/auth/book-access";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +14,11 @@ export async function GET(
 ) {
   try {
     const { bookId: rawBookId } = await params;
-    const bookId = decodeURIComponent(rawBookId);
-    const book = await getBookById(bookId);
+    const access = await requireBookAccess(rawBookId);
+    if (!access.ok) return access.response;
+    const book = access.book;
 
-    if (!book || !book.storageS3Key) {
+    if (!book.storageS3Key) {
       return NextResponse.json(
         { error: "PDF не найден или не сохранён в хранилище" },
         { status: 404 }
@@ -30,7 +31,8 @@ export async function GET(
       "https://fkkdgjmtbzzvbvdswxiz.supabase.co";
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    const s3Url = `${supabaseUrl}/storage/v1/object/public/${book.storageS3Key}`;
+    // Authenticated read: the PDF bucket is private.
+    const s3Url = `${supabaseUrl}/storage/v1/object/authenticated/${book.storageS3Key}`;
 
     // Forward range header from client PDF.js
     const rangeHeader = request.headers.get("range");
@@ -51,8 +53,8 @@ export async function GET(
     const responseHeaders = new Headers();
     responseHeaders.set("Content-Type", "application/pdf");
     responseHeaders.set("Accept-Ranges", "bytes");
-    responseHeaders.set("Access-Control-Allow-Origin", "*");
-    responseHeaders.set("Cache-Control", "public, max-age=31536000, immutable");
+    // Per-user content: never cache in shared caches.
+    responseHeaders.set("Cache-Control", "private, max-age=3600");
 
     const contentLength = upstreamRes.headers.get("content-length");
     if (contentLength) {

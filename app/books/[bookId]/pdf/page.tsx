@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { getBookById } from "@/server/books/queries";
+import { getBookForUser } from "@/server/books/queries";
+import { getCurrentUserId } from "@/lib/auth/get-current-user";
 import { PdfReader } from "@/components/reader/PdfReader";
 import { preconnect } from "react-dom";
 import { createSignedPdfUrl, getStorageOrigin } from "@/lib/storage/signed-pdf-url";
@@ -17,7 +18,8 @@ export default async function BookPdfPage({
   const { bookId: rawBookId } = await params;
   const { page: rawPage } = await searchParams;
   const bookId = decodeURIComponent(rawBookId);
-  const book = await getBookById(bookId);
+  const userId = await getCurrentUserId();
+  const book = await getBookForUser(userId, bookId);
   const initialPage = rawPage ? parseInt(rawPage, 10) : undefined;
 
   if (!book) {

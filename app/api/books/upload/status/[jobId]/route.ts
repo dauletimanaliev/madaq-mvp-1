@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import { getOptionalUserId } from "@/lib/auth/get-current-user";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
+    const userId = await getOptionalUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
+    }
     const { jobId } = await params;
 
     if (!jobId) {
@@ -27,7 +32,8 @@ export async function GET(
       },
     });
 
-    if (!job) {
+    // Only the uploader can see their job.
+    if (!job || job.userId !== userId) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
