@@ -1060,13 +1060,20 @@ export const EpubViewport = forwardRef<EpubViewportHandle, EpubViewportProps>(
                   const rect = range.getBoundingClientRect();
                   const clientX = iframeRect.left + rect.left + rect.width / 2;
                   const clientY = iframeRect.top + rect.top;
+                  // On phones the system Copy/Share menu sits above the
+                  // selection, so put ours below it.
+                  const isTouch =
+                    typeof window !== "undefined" &&
+                    window.matchMedia("(pointer: coarse)").matches;
 
                   setPopoverState({
-                    position: {
-                      x: clientX,
-                      y: clientY,
-                      placement: clientY > 150 ? "top" : "bottom",
-                    },
+                    position: isTouch
+                      ? { x: clientX, y: iframeRect.top + rect.bottom, placement: "bottom" }
+                      : {
+                          x: clientX,
+                          y: clientY,
+                          placement: clientY > 150 ? "top" : "bottom",
+                        },
                     range,
                     cfi,
                     selectedText: selText,
@@ -1080,6 +1087,13 @@ export const EpubViewport = forwardRef<EpubViewportHandle, EpubViewportProps>(
                 doc.addEventListener("mouseup", checkSelection);
                 doc.addEventListener("touchend", () => {
                   setTimeout(checkSelection, 120);
+                });
+                // Phones select by long-press and adjust with handles, which
+                // fire no mouseup/touchend; follow the selection itself.
+                let selectionTimer: ReturnType<typeof setTimeout> | undefined;
+                doc.addEventListener("selectionchange", () => {
+                  clearTimeout(selectionTimer);
+                  selectionTimer = setTimeout(checkSelection, 300);
                 });
               }
             } catch {

@@ -38,7 +38,10 @@ export function EpubHighlightPopover({
   // Calculate coordinates with safe padding from screen edges
   const popoverWidth = 320;
   const left = Math.max(12, Math.min(window.innerWidth - popoverWidth - 12, position.x - popoverWidth / 2));
-  const top = position.placement === "bottom" ? position.y + 12 : Math.max(10, position.y - 68);
+  const top =
+    position.placement === "bottom"
+      ? Math.min(position.y + 12, window.innerHeight - 76) // keep on screen
+      : Math.max(10, position.y - 68);
 
   const themeClasses = {
     paper: "bg-[#FDFBF7] text-[#1F1E1D] border-[#E5E0D8] shadow-lg shadow-black/10",

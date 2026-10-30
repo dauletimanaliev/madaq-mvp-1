@@ -523,6 +523,57 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
     updateVisiblePages();
   }, [pageWidth, doc, updateVisiblePages]);
 
+  // Reads the current text selection inside the pages and opens (or moves)
+  // the highlight menu for it. With `closeIfEmpty`, a vanished selection
+  // closes a menu that was opened for a selection.
+  const readSelection = useCallback((closeIfEmpty: boolean) => {
+    const sel = window.getSelection();
+    const selText = sel && sel.rangeCount > 0 && !sel.isCollapsed ? sel.toString().trim() : "";
+    const range = selText ? sel!.getRangeAt(0) : null;
+    const pageEl = range ? pageElementFromNode(range.startContainer) : null;
+    const rects =
+      range && pageEl
+        ? normalizeAndMergeRects(Array.from(range.getClientRects()), pageEl.getBoundingClientRect())
+        : [];
+
+    if (!range || !pageEl || rects.length === 0) {
+      if (closeIfEmpty && activeSelectionRef.current && !activeSelectionRef.current.existingHighlight) {
+        setActiveSelection(null);
+        setPendingHighlightData(null);
+      }
+      return;
+    }
+
+    setPendingHighlightData({
+      pageNumber: Number(pageEl.dataset.pdfPage),
+      rects,
+      selectedText: selText,
+    });
+    setActiveSelection({ rect: range.getBoundingClientRect(), existingHighlight: null });
+  }, []);
+
+  const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleSelectionCheck = useCallback(
+    (closeIfEmpty: boolean) => {
+      if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
+      selectionTimerRef.current = setTimeout(() => readSelection(closeIfEmpty), 250);
+    },
+    [readSelection]
+  );
+
+  // On phones a selection is made by long-press and then adjusted with the
+  // selection handles; neither fires mouseup/touchend on the page, so follow
+  // the selection itself. The menu is not closed when the selection clears:
+  // tapping a colour can clear it just before the tap lands.
+  useEffect(() => {
+    const onChange = () => scheduleSelectionCheck(false);
+    document.addEventListener("selectionchange", onChange);
+    return () => {
+      document.removeEventListener("selectionchange", onChange);
+      if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
+    };
+  }, [scheduleSelectionCheck]);
+
   const handleScroll = useCallback(() => {
     const scroller = scrollRef.current;
     if (!scroller) return;
@@ -534,13 +585,18 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
     if (delta > 6 && top > TOP_PADDING) setChromeVisible(false);
     else if (delta < -6) setChromeVisible(true);
 
-    if (activeSelectionRef.current && Math.abs(delta) > 0) {
-      setActiveSelection(null);
-      setPendingHighlightData(null);
+    const open = activeSelectionRef.current;
+    if (open && Math.abs(delta) > 0) {
+      if (open.existingHighlight) {
+        setActiveSelection(null);
+      } else {
+        // A text selection is still on screen: move the menu with it.
+        scheduleSelectionCheck(true);
+      }
     }
 
     updateVisiblePages();
-  }, [updateVisiblePages]);
+  }, [updateVisiblePages, scheduleSelectionCheck]);
 
   // 5. Auto-save reading progress (debounced).
   useEffect(() => {
@@ -568,31 +624,8 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
 
   // Selection → open highlight menu.
   const handleSelectionEnd = useCallback(() => {
-    setTimeout(() => {
-      const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
-      const selText = sel.toString().trim();
-      if (!selText) return;
-
-      const range = sel.getRangeAt(0);
-      const pageEl = pageElementFromNode(range.startContainer);
-      if (!pageEl) return;
-      const pageNumber = Number(pageEl.dataset.pdfPage);
-
-      // Rects outside the starting page collapse to zero size and are dropped.
-      const rects = normalizeAndMergeRects(
-        Array.from(range.getClientRects()),
-        pageEl.getBoundingClientRect()
-      );
-      if (rects.length === 0) return;
-
-      setPendingHighlightData({ pageNumber, rects, selectedText: selText });
-      setActiveSelection({
-        rect: range.getBoundingClientRect(),
-        existingHighlight: null,
-      });
-    }, 20);
-  }, []);
+    setTimeout(() => readSelection(false), 20);
+  }, [readSelection]);
 
   // Click → open an existing highlight, close the menu, or toggle the header.
   const handlePagesClick = (e: React.MouseEvent) => {
