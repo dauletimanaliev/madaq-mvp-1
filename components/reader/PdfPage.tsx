@@ -74,7 +74,14 @@ function PdfPageImpl({
         const scale = width / base.width;
         const viewport = page.getViewport({ scale });
         // Cap pixel density to keep canvases from exhausting memory on zoom.
-        const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+        // Phones refuse very large canvases and leave the page blank, so cap
+        // the pixel count per page.
+        const MAX_CANVAS_PIXELS = 4_000_000;
+        const outputScale = Math.min(
+          window.devicePixelRatio || 1,
+          2,
+          Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height))
+        );
 
         canvas.width = Math.floor(viewport.width * outputScale);
         canvas.height = Math.floor(viewport.height * outputScale);

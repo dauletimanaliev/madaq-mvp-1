@@ -13,7 +13,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { Book, Highlight, HighlightType, PdfHighlightRect } from "@/lib/types";
 import { HighlightMenu, type SelectionRange } from "./HighlightMenu";
 import { PdfPage } from "./PdfPage";
-import { PdfTocPanel, loadPdfToc, type PdfTocItem } from "./PdfTocPanel";
+import { PdfTocPanel, activeTocIndex, loadPdfToc, type PdfTocItem } from "./PdfTocPanel";
 import { ReaderProgress } from "./ReaderProgress";
 import { PdfZoomControl } from "./PdfZoomControl";
 import {
@@ -292,6 +292,8 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
   // Table of contents: null while loading, [] when the PDF has none.
   const [tocOpen, setTocOpen] = useState(false);
   const [toc, setToc] = useState<PdfTocItem[] | null>(null);
+  // Page chosen on the bottom slider while dragging; jumped to on release.
+  const [sliderPage, setSliderPage] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   // Results for the last query that finished loading; the spinner and the
   // visible list are derived from it instead of being reset inside effects.
@@ -332,11 +334,13 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
     activeSelectionRef.current = activeSelection;
   }, [activeSelection]);
 
-  const fitWidth = Math.max(
-    0,
-    Math.min(containerWidth - (containerWidth < 640 ? 16 : 64), MAX_FIT_WIDTH)
-  );
-  const pageWidth = Math.round(fitWidth * zoom);
+  // A page is never wider than the screen: a PDF page is an image, so a wider
+  // page would cut lines at the edges. Zoom grows it up to the screen width.
+  const availableWidth = Math.max(0, containerWidth - (containerWidth < 640 ? 16 : 64));
+  const fitWidth = Math.min(availableWidth, MAX_FIT_WIDTH);
+  const maxZoom = fitWidth > 0 ? Math.min(MAX_ZOOM, Math.max(1, availableWidth / fitWidth)) : 1;
+  const effectiveZoom = Math.min(zoom, maxZoom);
+  const pageWidth = Math.round(fitWidth * effectiveZoom);
 
   const highlightsByPage = useMemo(() => {
     const map: Record<number, Highlight[]> = {};
@@ -862,10 +866,10 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
         scrollToPage(Math.max(currentPage - 1, 1));
       } else if (e.key === "+" || e.key === "=") {
         e.preventDefault();
-        setZoom((z) => Math.min(+(z + 0.25).toFixed(2), MAX_ZOOM));
+        setZoom((z) => Math.min(+(Math.min(z, maxZoom) + 0.25).toFixed(2), maxZoom));
       } else if (e.key === "-") {
         e.preventDefault();
-        setZoom((z) => Math.max(+(z - 0.25).toFixed(2), MIN_ZOOM));
+        setZoom((z) => Math.max(+(Math.min(z, maxZoom) - 0.25).toFixed(2), MIN_ZOOM));
       } else if (e.key === "0") {
         e.preventDefault();
         setZoom(1);
@@ -873,7 +877,7 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentPage, numPages, searchOpen, tocOpen, openSearch, scrollToPage]);
+  }, [currentPage, numPages, searchOpen, tocOpen, openSearch, scrollToPage, maxZoom]);
 
   const submitPageDraft = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -892,18 +896,27 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
   const activeFirst = visibleRange.first - 1;
   const activeLast = visibleRange.last + 2;
   const isLoading = !doc && !error;
+  const menuVisible = chromeVisible || searchOpen || tocOpen;
+  const bottomMenuVisible = chromeVisible && !searchOpen && !tocOpen;
+  const tocIndex = toc ? activeTocIndex(toc, currentPage) : -1;
+  const currentChapterTitle = tocIndex >= 0 && toc ? toc[tocIndex].title : null;
+  const commitSlider = () => {
+    if (sliderPage !== null) scrollToPage(sliderPage);
+    setSliderPage(null);
+  };
 
   return (
     <div className="relative flex h-dvh w-screen flex-col overflow-hidden bg-white text-ink select-none">
       {/* Header: overlays the pages and hides while reading */}
+      {/* Top menu: shown on tap, hidden while reading */}
       <header
-        className={`absolute inset-x-0 top-0 z-30 flex h-12 items-center gap-2 border-b border-black/[0.06] bg-white/95 px-2 backdrop-blur-md transition-transform duration-200 sm:px-4 ${
-          chromeVisible || searchOpen || tocOpen ? "translate-y-0" : "-translate-y-full"
+        className={`absolute inset-x-0 top-0 z-30 flex h-12 items-center gap-1 border-b border-black/[0.06] bg-white/95 px-2 backdrop-blur-md transition-transform duration-200 sm:gap-2 sm:px-4 ${
+          menuVisible ? "translate-y-0" : "-translate-y-full"
         }`}
       >
         <Link
           href={`/books/${book.id}`}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-neutral-100 hover:text-ink"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors text-ink-muted hover:bg-neutral-100 hover:text-ink"
           title="Назад к книге"
           aria-label="Назад к книге"
         >
@@ -911,6 +924,23 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
+
+        <button
+          onClick={() => (searchOpen ? setSearchOpen(false) : openSearch())}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors ${
+            searchOpen ? "bg-accent text-paper-soft" : "text-ink-muted hover:bg-neutral-100 hover:text-ink"
+          }`}
+          title="Поиск в книге (Cmd+F)"
+          aria-label="Поиск в книге"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </button>
+
+        <h1 className="min-w-0 flex-1 truncate px-1 text-center font-serif text-sm text-ink">
+          {book.title}
+        </h1>
 
         <button
           type="button"
@@ -927,49 +957,12 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
           </svg>
         </button>
 
-        <h1 className="min-w-0 flex-1 truncate text-center font-serif text-sm text-ink">
-          {book.title}
-        </h1>
-
-        {numPages > 0 && (
-          <form onSubmit={submitPageDraft} className="flex shrink-0 items-center text-xs text-ink-muted">
-            {pageDraft !== null ? (
-              <input
-                autoFocus
-                inputMode="numeric"
-                value={pageDraft}
-                onChange={(e) => setPageDraft(e.target.value)}
-                onBlur={() => submitPageDraft()}
-                className="h-7 w-12 rounded border border-neutral-200 bg-white text-center font-mono text-xs text-ink focus:border-accent focus:outline-none"
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => setPageDraft(String(currentPage))}
-                className="rounded px-1.5 py-1 font-mono tabular-nums text-ink hover:bg-neutral-100"
-                title="Перейти к странице"
-              >
-                {currentPage}
-              </button>
-            )}
-            <span className="pl-1 font-mono tabular-nums">/ {numPages}</span>
-          </form>
-        )}
-
-        <PdfZoomControl zoom={zoom} min={MIN_ZOOM} max={MAX_ZOOM} onChange={setZoom} />
-
-        <button
-          onClick={() => (searchOpen ? setSearchOpen(false) : openSearch())}
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors ${
-            searchOpen ? "bg-accent text-paper-soft" : "text-ink-muted hover:bg-neutral-100 hover:text-ink"
-          }`}
-          title="Поиск в книге (Cmd+F)"
-          aria-label="Поиск в книге"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-        </button>
+        <PdfZoomControl
+          zoom={effectiveZoom}
+          min={MIN_ZOOM}
+          max={maxZoom}
+          onChange={(z) => setZoom(Math.min(z, maxZoom))}
+        />
       </header>
 
       {toastMessage && (
@@ -1095,7 +1088,7 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
             onTouchEnd={handleSelectionEnd}
             onClick={handlePagesClick}
             className="relative mx-auto flex w-max min-w-full flex-col items-center"
-            style={{ gap: PAGE_GAP, paddingTop: TOP_PADDING, paddingBottom: 48 }}
+            style={{ gap: PAGE_GAP, paddingTop: TOP_PADDING, paddingBottom: 96 }}
           >
             {Array.from({ length: numPages }, (_, i) => {
               const pageNumber = i + 1;
@@ -1117,13 +1110,61 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
         )}
       </div>
 
-      {/* Page tracker: stays visible while the header is hidden */}
-      {doc && (
+      {/* Bottom: a thin page tracker while reading, a full menu on tap */}
+      {doc && !bottomMenuVisible && (
         <ReaderProgress
           page={currentPage}
           total={numPages}
           className="absolute inset-x-0 bottom-0 z-20"
         />
+      )}
+      {doc && (
+        <div
+          className={`absolute inset-x-0 bottom-0 z-30 border-t border-black/[0.06] bg-white/95 px-4 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur-md transition-transform duration-200 ${
+            bottomMenuVisible ? "translate-y-0" : "translate-y-full"
+          }`}
+          aria-hidden={!bottomMenuVisible}
+        >
+          <input
+            type="range"
+            min={1}
+            max={Math.max(numPages, 1)}
+            value={sliderPage ?? currentPage}
+            onChange={(e) => setSliderPage(Number(e.target.value))}
+            onPointerUp={commitSlider}
+            onKeyUp={commitSlider}
+            onTouchEnd={commitSlider}
+            className="h-6 w-full cursor-pointer accent-accent"
+            aria-label="Перейти по книге"
+            tabIndex={bottomMenuVisible ? 0 : -1}
+          />
+          <div className="mt-1 flex items-center justify-between gap-3 text-xs text-ink-muted">
+            <span className="min-w-0 flex-1 truncate">{currentChapterTitle ?? ""}</span>
+            <form onSubmit={submitPageDraft} className="flex shrink-0 items-center">
+              {pageDraft !== null ? (
+                <input
+                  autoFocus
+                  inputMode="numeric"
+                  value={pageDraft}
+                  onChange={(e) => setPageDraft(e.target.value)}
+                  onBlur={() => submitPageDraft()}
+                  className="h-7 w-12 rounded border border-neutral-200 bg-white text-center font-mono text-xs text-ink focus:border-accent focus:outline-none"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setPageDraft(String(currentPage))}
+                  className="rounded px-1 py-0.5 font-mono tabular-nums text-ink hover:bg-neutral-100"
+                  title="Перейти к странице"
+                  tabIndex={bottomMenuVisible ? 0 : -1}
+                >
+                  {sliderPage ?? currentPage}
+                </button>
+              )}
+              <span className="pl-1 font-mono tabular-nums">/ {numPages}</span>
+            </form>
+          </div>
+        </div>
       )}
 
       <HighlightMenu

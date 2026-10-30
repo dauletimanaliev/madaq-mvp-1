@@ -7,7 +7,7 @@ const STEP = 0.25;
 /**
  * "Аа" button with a size popover for the PDF reader, matching the EPUB
  * reader. A PDF page is an image of the original, so this scales the whole
- * page; 100% means "fit the screen width".
+ * page, up to the width of the window; 100% is the normal reading width.
  */
 export function PdfZoomControl({
   zoom,
@@ -44,6 +44,10 @@ export function PdfZoomControl({
     const next = Math.round((zoom + dir * STEP) / STEP) * STEP;
     onChange(Math.min(max, Math.max(min, next)));
   };
+  // The page is already as wide as the screen (phones in portrait).
+  const atScreenWidth = max - zoom < 0.01;
+  const isTouch =
+    typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
 
   return (
     <div ref={rootRef} className="relative shrink-0">
@@ -80,7 +84,7 @@ export function PdfZoomControl({
             <button
               type="button"
               onClick={() => step(1)}
-              disabled={zoom >= max}
+              disabled={atScreenWidth}
               className="flex h-9 w-11 items-center justify-center rounded text-sm font-bold hover:bg-neutral-100 active:scale-90 disabled:opacity-30"
               title="Увеличить"
               aria-label="Увеличить"
@@ -94,11 +98,14 @@ export function PdfZoomControl({
             disabled={zoom === 1}
             className="mt-2.5 w-full rounded-md py-1.5 text-xs text-ink-muted hover:bg-neutral-100 hover:text-ink disabled:opacity-40"
           >
-            По ширине экрана
+            Обычный размер
           </button>
           <p className="mt-2 text-[11px] leading-snug text-ink-muted">
-            PDF показывается как оригинал, поэтому увеличивается вся страница. Если она станет шире
-            экрана, её можно двигать в стороны.
+            {atScreenWidth
+              ? isTouch
+                ? "Страница уже во всю ширину экрана. Поверните телефон горизонтально — текст станет крупнее."
+                : "Страница уже во всю ширину окна. Разверните окно шире, чтобы увеличить ещё."
+              : "PDF показывается как оригинал, поэтому увеличивается вся страница — максимум до ширины окна."}
           </p>
         </div>
       )}
