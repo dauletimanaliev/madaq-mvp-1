@@ -1,10 +1,12 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import type { EpubTheme, EpubTocItem } from "./types";
 
 interface EpubTocPanelProps {
   isOpen: boolean;
   items: EpubTocItem[];
   theme?: EpubTheme;
+  /** Label of the chapter being read, to highlight it in the list. */
+  currentLabel?: string | null;
   onClose: () => void;
   onNavigate: (href: string) => void;
 }
@@ -16,6 +18,7 @@ const tocThemeClasses: Record<
     header: string;
     title: string;
     item: string;
+    activeItem: string;
     subitemBorder: string;
     closeBtn: string;
     emptyText: string;
@@ -24,9 +27,10 @@ const tocThemeClasses: Record<
 > = {
   paper: {
     drawer: "bg-[#ffffff] border-[#e7e5e4] text-[#1c1917]",
-    header: "bg-[#f5f2eb] border-[#e7e5e4]",
+    header: "bg-[#ffffff] border-[#e7e5e4]",
     title: "text-[#1c1917]",
-    item: "text-[#1c1917] hover:bg-[#eae6dd] hover:text-[#7a2e3a]",
+    item: "text-[#1c1917] hover:bg-[#f5f5f4] hover:text-[#7a2e3a]",
+    activeItem: "bg-[#7a2e3a]/10 text-[#7a2e3a]",
     subitemBorder: "border-[#e7e5e4]",
     closeBtn: "text-[#78716c] hover:text-[#1c1917] hover:bg-[#e7e5e4]",
     emptyText: "text-[#78716c]",
@@ -37,6 +41,7 @@ const tocThemeClasses: Record<
     header: "bg-[#ebe0c5] border-[#dfd1b5]",
     title: "text-[#382a18]",
     item: "text-[#382a18] hover:bg-[#e2d5b6] hover:text-[#6d281a]",
+    activeItem: "bg-[#6d281a]/10 text-[#6d281a]",
     subitemBorder: "border-[#dfd1b5]",
     closeBtn: "text-[#7d674c] hover:text-[#382a18] hover:bg-[#dfd1b5]",
     emptyText: "text-[#7d674c]",
@@ -47,6 +52,7 @@ const tocThemeClasses: Record<
     header: "bg-[#202023] border-[#27272a]",
     title: "text-[#e4e4e7]",
     item: "text-[#e4e4e7] hover:bg-[#27272a] hover:text-[#ffffff]",
+    activeItem: "bg-white/10 text-[#ffffff]",
     subitemBorder: "border-[#27272a]",
     closeBtn: "text-[#a1a1aa] hover:text-[#ffffff] hover:bg-[#27272a]",
     emptyText: "text-[#a1a1aa]",
@@ -58,14 +64,17 @@ function TocItemNode({
   item,
   depth = 0,
   themeClass,
+  currentLabel,
   onNavigate,
 }: {
   item: EpubTocItem;
   depth?: number;
-  themeClass: { item: string; subitemBorder: string };
+  themeClass: { item: string; activeItem: string; subitemBorder: string };
+  currentLabel?: string | null;
   onNavigate: (href: string) => void;
 }) {
   const hasSubitems = Array.isArray(item.subitems) && item.subitems.length > 0;
+  const isActive = Boolean(currentLabel) && item.label?.trim() === currentLabel?.trim();
 
   return (
     <div className="flex flex-col">
@@ -76,7 +85,9 @@ function TocItemNode({
             onNavigate(item.href);
           }
         }}
-        className={`w-full text-left py-2 px-3 rounded-md text-sm ${themeClass.item} transition-colors flex items-center justify-between group`}
+        data-active={isActive || undefined}
+        aria-current={isActive ? "location" : undefined}
+        className={`w-full text-left py-2 px-3 rounded-md text-sm ${isActive ? themeClass.activeItem : themeClass.item} transition-colors flex items-center justify-between group`}
         style={{ paddingLeft: `${12 + depth * 16}px` }}
       >
         <span className="truncate font-medium group-hover:underline">
@@ -92,6 +103,7 @@ function TocItemNode({
               item={sub}
               depth={depth + 1}
               themeClass={themeClass}
+              currentLabel={currentLabel}
               onNavigate={onNavigate}
             />
           ))}
@@ -105,10 +117,24 @@ export function EpubTocPanel({
   isOpen,
   items,
   theme = "paper",
+  currentLabel,
   onClose,
   onNavigate,
 }: EpubTocPanelProps) {
   const tc = tocThemeClasses[theme] || tocThemeClasses.paper;
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  // Open the list scrolled to the chapter being read.
+  useEffect(() => {
+    if (!isOpen) return;
+    const list = listRef.current;
+    const el = list?.querySelector<HTMLElement>("[data-active]");
+    if (list && el) {
+      // Scroll only the list, not the page behind the drawer.
+      const top = el.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
+      list.scrollTop = top - list.clientHeight / 2 + el.offsetHeight / 2;
+    }
+  }, [isOpen, currentLabel]);
 
   // Close on Escape
   useEffect(() => {
@@ -164,7 +190,7 @@ export function EpubTocPanel({
         </div>
 
         {/* Drawer List */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+        <div ref={listRef} className="flex-1 overflow-y-auto p-3 space-y-1">
           {items && items.length > 0 ? (
             items.map((item, index) => (
               <TocItemNode
@@ -172,6 +198,7 @@ export function EpubTocPanel({
                 item={item}
                 depth={0}
                 themeClass={tc}
+                currentLabel={currentLabel}
                 onNavigate={onNavigate}
               />
             ))

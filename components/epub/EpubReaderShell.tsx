@@ -136,6 +136,7 @@ function EpubReaderContent({ bookId, title, isMobile, initialTheme }: EpubReader
           <EpubTocPanel
             isOpen={tocOpen}
             items={tocItems}
+            currentLabel={currentLabel}
             theme={theme}
             onClose={handleCloseToc}
             onNavigate={handleNavigate}
@@ -173,6 +174,7 @@ function EpubReaderContent({ bookId, title, isMobile, initialTheme }: EpubReader
       <EpubTocPanel
         isOpen={tocOpen}
         items={tocItems}
+        currentLabel={currentLabel}
         theme={theme}
         onClose={handleCloseToc}
         onNavigate={handleNavigate}

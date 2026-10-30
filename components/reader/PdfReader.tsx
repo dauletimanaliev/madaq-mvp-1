@@ -13,6 +13,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { Book, Highlight, HighlightType, PdfHighlightRect } from "@/lib/types";
 import { HighlightMenu, type SelectionRange } from "./HighlightMenu";
 import { PdfPage } from "./PdfPage";
+import { PdfTocPanel, loadPdfToc, type PdfTocItem } from "./PdfTocPanel";
 import {
   fetchPdfBookHighlights,
   savePdfHighlight,
@@ -269,6 +270,9 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
 
   // Search
   const [searchOpen, setSearchOpen] = useState(false);
+  // Table of contents: null while loading, [] when the PDF has none.
+  const [tocOpen, setTocOpen] = useState(false);
+  const [toc, setToc] = useState<PdfTocItem[] | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   // Results for the last query that finished loading; the spinner and the
   // visible list are derived from it instead of being reset inside effects.
@@ -300,6 +304,10 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
   const progressReadyRef = useRef(Boolean(initialPage && initialPage >= 1));
   const anchorRef = useRef({ page: 1, fraction: 0 });
   const lastScrollTopRef = useRef(0);
+  // Time of the reader's last own scroll input (wheel, finger, keys). Only
+  // such scrolls hide the header; the reader's own jumps (restore, contents,
+  // zoom, pages settling their size) must not.
+  const lastUserScrollInputRef = useRef(0);
   const activeSelectionRef = useRef<SelectionRange | null>(null);
   useEffect(() => {
     activeSelectionRef.current = activeSelection;
@@ -462,6 +470,27 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const mark = () => {
+      lastUserScrollInputRef.current = performance.now();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", " ", "Home", "End"].includes(e.key)) mark();
+    };
+    el.addEventListener("wheel", mark, { passive: true });
+    el.addEventListener("touchmove", mark, { passive: true });
+    el.addEventListener("pointerdown", mark); // scrollbar drag
+    window.addEventListener("keydown", onKey);
+    return () => {
+      el.removeEventListener("wheel", mark);
+      el.removeEventListener("touchmove", mark);
+      el.removeEventListener("pointerdown", mark);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
   const updateVisiblePages = useCallback(() => {
     const scroller = scrollRef.current;
     const pages = pagesRef.current?.children;
@@ -582,7 +611,8 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
     const top = scroller.scrollTop;
     const delta = top - lastScrollTopRef.current;
     lastScrollTopRef.current = top;
-    if (delta > 6 && top > TOP_PADDING) setChromeVisible(false);
+    const byUser = performance.now() - lastUserScrollInputRef.current < 1000;
+    if (byUser && delta > 6 && top > TOP_PADDING) setChromeVisible(false);
     else if (delta < -6) setChromeVisible(true);
 
     const open = activeSelectionRef.current;
@@ -756,7 +786,30 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
     return () => clearTimeout(handler);
   }, [isSearchActive, trimmedSearchQuery, book.id]);
 
+  // Read the PDF's own table of contents once the document is open.
+  useEffect(() => {
+    if (!doc) return;
+    let active = true;
+    loadPdfToc(doc.pdfDoc)
+      .then((items) => {
+        if (active) setToc(items);
+      })
+      .catch(() => {
+        if (active) setToc([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [doc]);
+
+  const toggleToc = useCallback(() => {
+    setTocOpen((open) => !open);
+    setSearchOpen(false);
+    setChromeVisible(true);
+  }, []);
+
   const openSearch = useCallback(() => {
+    setTocOpen(false);
     setSearchOpen(true);
     setChromeVisible(true);
     setTimeout(() => searchInputRef.current?.focus(), 50);
@@ -770,8 +823,9 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
         openSearch();
         return;
       }
-      if (e.key === "Escape" && searchOpen) {
+      if (e.key === "Escape" && (searchOpen || tocOpen)) {
         setSearchOpen(false);
+        setTocOpen(false);
         return;
       }
       if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey) return;
@@ -795,7 +849,7 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentPage, numPages, searchOpen, openSearch, scrollToPage]);
+  }, [currentPage, numPages, searchOpen, tocOpen, openSearch, scrollToPage]);
 
   const submitPageDraft = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -820,7 +874,7 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
       {/* Header: overlays the pages and hides while reading */}
       <header
         className={`absolute inset-x-0 top-0 z-30 flex h-12 items-center gap-2 border-b border-black/[0.06] bg-white/95 px-2 backdrop-blur-md transition-transform duration-200 sm:px-4 ${
-          chromeVisible || searchOpen ? "translate-y-0" : "-translate-y-full"
+          chromeVisible || searchOpen || tocOpen ? "translate-y-0" : "-translate-y-full"
         }`}
       >
         <Link
@@ -833,6 +887,21 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
+
+        <button
+          type="button"
+          onClick={toggleToc}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors ${
+            tocOpen ? "bg-accent text-paper-soft" : "text-ink-muted hover:bg-neutral-100 hover:text-ink"
+          }`}
+          title="Оглавление"
+          aria-label="Оглавление"
+          aria-expanded={tocOpen}
+        >
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h10" />
+          </svg>
+        </button>
 
         <h1 className="min-w-0 flex-1 truncate text-center font-serif text-sm text-ink">
           {book.title}
@@ -881,6 +950,18 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
         <div className="absolute top-16 left-1/2 z-40 -translate-x-1/2 rounded-full border border-neutral-200 bg-white/95 px-4 py-2 text-xs text-ink shadow-lg backdrop-blur-md">
           {toastMessage}
         </div>
+      )}
+
+      {tocOpen && (
+        <PdfTocPanel
+          items={toc}
+          currentPage={currentPage}
+          onNavigate={(page) => {
+            scrollToPage(page);
+            setTocOpen(false);
+          }}
+          onClose={() => setTocOpen(false)}
+        />
       )}
 
       {/* Search drawer */}
