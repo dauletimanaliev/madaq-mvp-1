@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { getOptionalUserId } from "@/lib/auth/get-current-user";
 import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +15,7 @@ export async function GET(
     const { bookId: rawBookId } = await params;
     const bookId = decodeURIComponent(rawBookId);
 
-    const session = await auth();
-    const userId = session?.user?.id;
+    const userId = await getOptionalUserId();
 
     if (!userId) {
       return NextResponse.json({ lastReadPage: 1, progressPct: 0, isGuest: true });
@@ -69,8 +68,7 @@ export async function POST(
     const progressPct =
       totalPages > 0 ? Math.min(100, Math.round((page / totalPages) * 100)) : 0;
 
-    const session = await auth();
-    const userId = session?.user?.id;
+    const userId = await getOptionalUserId();
 
     if (!userId) {
       // Unauthenticated / guest user: client saves in localStorage
@@ -91,6 +89,15 @@ export async function POST(
     });
     if (updated.count === 0) {
       return NextResponse.json({ error: "Книга не найдена" }, { status: 404 });
+    }
+
+    // EPUB books have no printed page count; remember the reader's count
+    // (it depends only on the file, so it is the same for every reader).
+    if (totalPages > 0) {
+      await prisma.book.updateMany({
+        where: { id: bookId, contentFormat: "EPUB", OR: [{ totalPages: null }, { totalPages: 0 }] },
+        data: { totalPages },
+      });
     }
 
     return NextResponse.json({

@@ -28,6 +28,8 @@ interface EpubViewportProps {
   isMobile?: boolean;
   onTocLoaded: (items: EpubTocItem[]) => void;
   onRelocate: (label: string | null) => void;
+  /** Reading position in stable "pages" of ~1500 characters (independent of font size). */
+  onProgress?: (page: number, total: number) => void;
 }
 
 export const themePalettes: Record<
@@ -367,9 +369,14 @@ interface FoliateViewElement extends HTMLElement {
 
 export const EpubViewport = forwardRef<EpubViewportHandle, EpubViewportProps>(
   function EpubViewport(
-    { bookId, theme, fontSize, isMobile, onTocLoaded, onRelocate },
+    { bookId, theme, fontSize, isMobile, onTocLoaded, onRelocate, onProgress },
     ref
   ) {
+    // Kept in a ref so a new callback does not re-open the book.
+    const onProgressRef = useRef(onProgress);
+    useEffect(() => {
+      onProgressRef.current = onProgress;
+    }, [onProgress]);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const viewRef = useRef<FoliateViewElement | null>(null);
     const bookLangRef = useRef<"ru" | "en" | "kk">("ru");
@@ -908,7 +915,15 @@ export const EpubViewport = forwardRef<EpubViewportHandle, EpubViewportProps>(
 
           // Attach listeners BEFORE opening the book so initial load and transitions are caught
           const handleRelocate = (e: Event) => {
-            const detail = (e as CustomEvent<{ cfi?: string; tocItem?: { label?: string }; fraction?: number }>).detail;
+            const detail = (e as CustomEvent<{
+              cfi?: string;
+              tocItem?: { label?: string };
+              fraction?: number;
+              location?: { current: number; total: number };
+            }>).detail;
+            if (detail?.location && detail.location.total > 0) {
+              onProgressRef.current?.(detail.location.current + 1, detail.location.total);
+            }
             if (detail?.cfi) {
               try {
                 localStorage.setItem(`epub-cfi:${bookId}`, detail.cfi);

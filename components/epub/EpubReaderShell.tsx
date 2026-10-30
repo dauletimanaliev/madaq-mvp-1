@@ -4,6 +4,7 @@ import React, { useRef, useState, useCallback, useSyncExternalStore } from "reac
 import { EpubTopBar } from "./EpubTopBar";
 import { EpubTocPanel } from "./EpubTocPanel";
 import { EpubViewport } from "./EpubViewport";
+import { ReaderProgress } from "@/components/reader/ReaderProgress";
 import type { EpubTheme, EpubTocItem, EpubViewportHandle } from "./types";
 
 interface EpubReaderShellProps {
@@ -30,6 +31,24 @@ function EpubReaderContent({ bookId, title, isMobile, initialTheme }: EpubReader
   const [tocOpen, setTocOpen] = useState<boolean>(false);
   const [tocItems, setTocItems] = useState<EpubTocItem[]>([]);
   const [currentLabel, setCurrentLabel] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ page: number; total: number } | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Show the page tracker and save progress to the library (debounced).
+  const handleProgress = useCallback(
+    (page: number, total: number) => {
+      setProgress((prev) => (prev?.page === page && prev.total === total ? prev : { page, total }));
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        fetch(`/api/books/${bookId}/progress`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ page, totalPages: total }),
+        }).catch(() => {});
+      }, 1000);
+    },
+    [bookId]
+  );
 
   // Initialize theme & font size from localStorage once mounted on client
   const [theme, setTheme] = useState<EpubTheme>(() => {
@@ -106,6 +125,7 @@ function EpubReaderContent({ bookId, title, isMobile, initialTheme }: EpubReader
   }, []);
 
   const isMobileSim = process.env.NODE_ENV !== "production" && Boolean(isMobile);
+  const progressTone = theme === "dark" ? "dark" : theme === "sepia" ? "sepia" : "light";
 
   const shellBg =
     theme === "dark"
@@ -149,7 +169,11 @@ function EpubReaderContent({ bookId, title, isMobile, initialTheme }: EpubReader
             isMobile={isMobile}
             onTocLoaded={handleTocLoaded}
             onRelocate={handleRelocate}
+            onProgress={handleProgress}
           />
+          {progress && (
+            <ReaderProgress page={progress.page} total={progress.total} tone={progressTone} className="shrink-0" />
+          )}
         </div>
       </div>
     );
@@ -187,7 +211,11 @@ function EpubReaderContent({ bookId, title, isMobile, initialTheme }: EpubReader
         isMobile={isMobile}
         onTocLoaded={handleTocLoaded}
         onRelocate={handleRelocate}
+        onProgress={handleProgress}
       />
+      {progress && (
+        <ReaderProgress page={progress.page} total={progress.total} tone={progressTone} className="shrink-0" />
+      )}
     </div>
   );
 }

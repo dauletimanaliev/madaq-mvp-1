@@ -14,6 +14,7 @@ import type { Book, Highlight, HighlightType, PdfHighlightRect } from "@/lib/typ
 import { HighlightMenu, type SelectionRange } from "./HighlightMenu";
 import { PdfPage } from "./PdfPage";
 import { PdfTocPanel, loadPdfToc, type PdfTocItem } from "./PdfTocPanel";
+import { ReaderProgress } from "./ReaderProgress";
 import {
   fetchPdfBookHighlights,
   savePdfHighlight,
@@ -947,7 +948,7 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
       </header>
 
       {toastMessage && (
-        <div className="absolute top-16 left-1/2 z-40 -translate-x-1/2 rounded-full border border-neutral-200 bg-white/95 px-4 py-2 text-xs text-ink shadow-lg backdrop-blur-md">
+        <div className="absolute top-16 left-1/2 z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-neutral-200 bg-white/95 px-4 py-2 text-xs text-ink shadow-lg backdrop-blur-md">
           {toastMessage}
         </div>
       )}
@@ -1090,6 +1091,15 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
           </div>
         )}
       </div>
+
+      {/* Page tracker: stays visible while the header is hidden */}
+      {doc && (
+        <ReaderProgress
+          page={currentPage}
+          total={numPages}
+          className="absolute inset-x-0 bottom-0 z-20"
+        />
+      )}
 
       <HighlightMenu
         bookId={book.id}

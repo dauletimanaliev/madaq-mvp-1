@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Book } from "@/lib/types";
 import { getBookReaderUrl } from "@/lib/books/reader-url";
 import { RemoveBookButton } from "./RemoveBookButton";
+import { ReadingProgressLine } from "./ReadingProgressLine";
 
 export function BookHero({
   book,
@@ -47,12 +48,13 @@ export function BookHero({
             .filter(Boolean)
             .join(" · ")}
         </p>
+        <ReadingProgressLine book={book} />
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <Link
             href={getBookReaderUrl(book)}
             className="inline-flex w-fit items-center rounded-sm bg-accent px-5 py-2.5 text-sm font-medium text-paper-soft transition-opacity hover:opacity-90"
           >
-            Читать
+            {book.readingProgress && (book.readingProgress.lastReadPage > 1 || book.readingProgress.progressPct > 0) ? "Продолжить" : "Читать"}
           </Link>
           {book.storageS3Key && book.contentFormat !== "PDF" && (
             <Link

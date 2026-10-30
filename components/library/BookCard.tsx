@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { Book } from "@/lib/types";
+import { ReadingProgressLine } from "@/components/book/ReadingProgressLine";
 
 export function BookCard({ book }: { book: Book }) {
   return (
@@ -26,6 +27,7 @@ export function BookCard({ book }: { book: Book }) {
         {book.description && (
           <p className="max-w-md text-sm text-ink-muted">{book.description}</p>
         )}
+        <ReadingProgressLine book={book} />
         <div className="mt-2 flex items-center gap-2">
           <span className="text-sm font-medium text-accent group-hover:underline">
             Открыть

@@ -8,19 +8,28 @@ export async function getLibraryBooks(userId: string): Promise<Book[]> {
     include: { book: { include: { author: true } } },
     orderBy: { createdAt: "desc" },
   });
-  return entries.map((e) => e.book);
+  return entries.map((e) => ({
+    ...e.book,
+    readingProgress: { lastReadPage: e.lastReadPage, progressPct: e.progressPct },
+  }));
 }
 
 /** The book, only if it is in the user's library; null otherwise. */
 export async function getBookForUser(userId: string, id: string): Promise<Book | null> {
   const decoded = decodeURIComponent(id);
-  return prisma.book.findFirst({
+  const book = await prisma.book.findFirst({
     where: {
       OR: [{ id }, { id: decoded }],
       userLibraries: { some: { userId } },
     },
-    include: { author: true },
+    include: {
+      author: true,
+      userLibraries: { where: { userId }, select: { lastReadPage: true, progressPct: true } },
+    },
   });
+  if (!book) return null;
+  const { userLibraries, ...rest } = book;
+  return { ...rest, readingProgress: userLibraries[0] ?? null };
 }
 
 export async function getBookById(id: string): Promise<Book | null> {

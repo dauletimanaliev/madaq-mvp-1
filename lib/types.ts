@@ -20,6 +20,8 @@ export type Book = {
   contentFormat?: "TEXT" | "PDF" | "EPUB";
   epubStorageKey?: string | null;
   author: Author;
+  /** The signed-in reader's progress, when loaded from their library. */
+  readingProgress?: { lastReadPage: number; progressPct: number } | null;
 };
 
 export type Chapter = {
