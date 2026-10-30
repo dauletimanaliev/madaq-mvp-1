@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { removeHighlight } from "@/app/notes/actions";
-import { highlightTypeByName } from "@/lib/highlights/types";
+import { highlightTypeByName, uncategorizedHighlight } from "@/lib/highlights/types";
 import type { HighlightNote } from "@/server/highlights/queries";
 
 export function NoteItem({ note }: { note: HighlightNote }) {
   const type = note.type ? highlightTypeByName[note.type] : null;
+  const style = (type ?? uncategorizedHighlight).noteStyle;
 
   // Navigation target logic
   let readerHref: string;
@@ -23,18 +24,22 @@ export function NoteItem({ note }: { note: HighlightNote }) {
   }
 
   return (
-    <article className="rounded-sm border border-border bg-paper-soft px-5 py-4">
-      <p className="font-serif text-lg leading-relaxed">{note.selectedText}</p>
+    <article className={`rounded-sm border border-l-4 border-border bg-white px-5 py-4 ${style.stripe}`}>
+      {/* The fragment keeps its highlight colour; dark text on a light marker stays easy to read. */}
+      <p className="font-serif text-lg leading-[1.9] text-ink">
+        <mark className={`rounded-sm px-1 py-0.5 text-ink [box-decoration-break:clone] [-webkit-box-decoration-break:clone] ${style.mark}`}>
+          {note.selectedText}
+        </mark>
+      </p>
       {note.note && (
-        <p className="mt-2 text-sm italic text-ink-muted bg-paper p-2 rounded border border-border/50">
+        <p className="mt-3 rounded border border-border/60 bg-paper-soft p-2.5 text-sm italic text-ink-muted">
           {note.note}
         </p>
       )}
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-muted">
-        <span className="font-medium text-ink">
-          {type
-            ? `${type.name} — ${type.colorName.toLowerCase()}`
-            : "Без категории"}
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ink-muted">
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${style.label}`}>
+          <span className={`h-2 w-2 rounded-full ${style.dot}`} aria-hidden="true" />
+          {type ? type.name : uncategorizedHighlight.name}
         </span>
         <span>{note.bookTitle}</span>
         <span>

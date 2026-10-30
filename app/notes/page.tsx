@@ -46,7 +46,10 @@ export default async function NotesPage({
               : "border-border text-ink-muted hover:text-ink"
           }`}
         >
-          {uncategorizedHighlight.name}
+          <span className="inline-flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full ${uncategorizedHighlight.noteStyle.dot}`} aria-hidden="true" />
+            {uncategorizedHighlight.name}
+          </span>
         </Link>
         {highlightTypes.map((item) => (
           <Link
@@ -58,7 +61,10 @@ export default async function NotesPage({
                 : "border-border text-ink-muted hover:text-ink"
             }`}
           >
-            {item.name}
+            <span className="inline-flex items-center gap-1.5">
+              <span className={`h-2 w-2 rounded-full ${item.noteStyle.dot}`} aria-hidden="true" />
+              {item.name}
+            </span>
           </Link>
         ))}
       </nav>
