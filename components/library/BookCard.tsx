@@ -20,9 +20,9 @@ export function BookCard({ book }: { book: Book }) {
       ) : (
         <div className="h-36 w-24 rounded-sm bg-ink/10 bg-gradient-to-br from-ink/20 to-ink/5" />
       )}
-      <div className="flex flex-col justify-center gap-2">
+      <div className="flex min-w-0 flex-col justify-center gap-2">
         <p className="text-sm text-ink-muted">{book.author.name}</p>
-        <h2 className="font-serif text-2xl leading-snug">{book.title}</h2>
+        <h2 className="font-serif text-2xl leading-snug [overflow-wrap:anywhere]">{book.title}</h2>
         {book.description && (
           <p className="max-w-md text-sm text-ink-muted">{book.description}</p>
         )}

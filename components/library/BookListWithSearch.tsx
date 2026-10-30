@@ -47,9 +47,9 @@ export function BookListWithSearch({
     <div className="mt-8 flex flex-col gap-6">
       {/* Search Input Bar (pg_trgm powered) */}
       <div className="relative w-full">
-        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-[#888072]">
+        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-ink-muted">
           {isSearching ? (
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#888072] border-t-[#d97736]" />
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-accent" />
           ) : (
             <svg
               className="h-4 w-4"
@@ -78,7 +78,7 @@ export function BookListWithSearch({
         {query && (
           <button
             onClick={() => setQuery("")}
-            className="absolute inset-y-0 right-0 flex items-center pr-3 text-[#888072] hover:text-ink"
+            className="absolute inset-y-0 right-0 flex items-center pr-3 text-ink-muted hover:text-ink"
             title="Очистить"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -23,7 +23,7 @@ const tocThemeClasses: Record<
   }
 > = {
   paper: {
-    drawer: "bg-[#faf8f5] border-[#e7e5e4] text-[#1c1917]",
+    drawer: "bg-[#ffffff] border-[#e7e5e4] text-[#1c1917]",
     header: "bg-[#f5f2eb] border-[#e7e5e4]",
     title: "text-[#1c1917]",
     item: "text-[#1c1917] hover:bg-[#eae6dd] hover:text-[#7a2e3a]",

@@ -112,7 +112,7 @@ function EpubReaderContent({ bookId, title, isMobile, initialTheme }: EpubReader
       ? "bg-[#18181b] text-[#e4e4e7]"
       : theme === "sepia"
       ? "bg-[#f4ecd8] text-[#382a18]"
-      : "bg-[#faf8f5] text-[#1c1917]";
+      : "bg-[#ffffff] text-[#1c1917]";
 
   if (isMobileSim) {
     return (
@@ -195,8 +195,8 @@ export function EpubReaderShell(props: EpubReaderShellProps) {
 
   if (!mounted) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-[#faf8f5] text-[#1c1917] overflow-hidden">
-        <header className="flex h-14 w-full items-center justify-between border-b border-stone-200/80 px-4 bg-[#faf8f5]">
+      <div className="fixed inset-0 z-50 flex flex-col bg-[#ffffff] text-[#1c1917] overflow-hidden">
+        <header className="flex h-14 w-full items-center justify-between border-b border-stone-200/80 px-4 bg-[#ffffff]">
           <div className="flex items-center gap-3">
             <div className="h-4 w-24 rounded bg-stone-200/60" />
           </div>

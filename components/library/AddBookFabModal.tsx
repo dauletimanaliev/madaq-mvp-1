@@ -403,7 +403,7 @@ export function AddBookFabModal() {
               pointerEvents: "none",
               borderRadius: "9999px",
               backgroundColor: "var(--ink, #211d16)",
-              color: "var(--paper, #efe6d3)",
+              color: "var(--paper, #ffffff)",
               padding: "6px 14px",
               fontSize: "12px",
               fontWeight: 600,

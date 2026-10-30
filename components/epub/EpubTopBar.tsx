@@ -31,11 +31,11 @@ const topBarThemeClasses: Record<
   }
 > = {
   paper: {
-    header: "bg-[#faf8f5] border-[#e7e5e4] text-[#1c1917]",
+    header: "bg-[#ffffff] border-[#e7e5e4] text-[#1c1917]",
     text: "text-[#1c1917]",
     muted: "text-[#78716c]",
     hoverBtn: "hover:bg-[#e7e5e4] text-[#1c1917]",
-    popover: "bg-[#faf8f5] border-[#e7e5e4] text-[#1c1917]",
+    popover: "bg-[#ffffff] border-[#e7e5e4] text-[#1c1917]",
     stepperBox: "bg-[#ffffff] border-[#e7e5e4] text-[#1c1917]",
     divider: "bg-[#e7e5e4]",
     aaActive: "bg-[#e7e5e4] text-[#1c1917]",
@@ -198,11 +198,11 @@ export function EpubTopBar({
                   onClick={() => onThemeChange("paper")}
                   className={`flex flex-col items-center gap-1.5 rounded-lg border p-2 text-[11px] font-medium transition-all ${
                     theme === "paper"
-                      ? "border-amber-600 ring-2 ring-amber-600/30 bg-[#faf8f5] text-[#1c1917] font-bold"
-                      : "border-black/10 bg-[#faf8f5] text-[#1c1917] opacity-80 hover:opacity-100"
+                      ? "border-amber-600 ring-2 ring-amber-600/30 bg-[#ffffff] text-[#1c1917] font-bold"
+                      : "border-black/10 bg-[#ffffff] text-[#1c1917] opacity-80 hover:opacity-100"
                   }`}
                 >
-                  <span className="h-4 w-4 rounded-full border border-black/10 bg-[#faf8f5]" />
+                  <span className="h-4 w-4 rounded-full border border-black/10 bg-[#ffffff]" />
                   Бумага
                 </button>
 

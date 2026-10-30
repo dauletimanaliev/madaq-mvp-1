@@ -35,7 +35,7 @@ export const themePalettes: Record<
   { bg: string; text: string; link: string; selection: string; border: string }
 > = {
   paper: {
-    bg: "#faf8f5",
+    bg: "#ffffff",
     text: "#1c1917",
     link: "#7a2e3a",
     selection: "rgba(180, 83, 9, 0.22)",

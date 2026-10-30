@@ -1,16 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  /* Библиотека — тёплая бумага, читается днём */
-  --paper: #efe6d3;
-  --paper-soft: #f7f2e6;
-  --ink: #211d16;
-  --ink-muted: #6e6656;
+  /* Единый белый вид, как у оригинальной страницы книги */
+  --paper: #ffffff;
+  --paper-soft: #f6f6f5;
+  --ink: #1c1917;
+  --ink-muted: #6b6661;
   --accent: #7a2e3a; /* переплёт книги, а не терракота */
-  --accent-soft: #efd9dc;
-  --border: #ddd0b3;
+  --accent-soft: #f3e4e6;
+  --border: #e7e5e4;
 
-  /* Reader — тёплая бумага (единый стиль для всех форматов: EPUB, PDF, Text) */
+  /* Reader — тот же белый фон для всех форматов: EPUB, PDF, Text */
   --reader-bg: var(--paper);
   --reader-text: var(--ink);
   --reader-muted: var(--ink-muted);
