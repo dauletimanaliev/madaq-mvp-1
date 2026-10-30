@@ -15,6 +15,7 @@ import { HighlightMenu, type SelectionRange } from "./HighlightMenu";
 import { PdfPage } from "./PdfPage";
 import { PdfTocPanel, loadPdfToc, type PdfTocItem } from "./PdfTocPanel";
 import { ReaderProgress } from "./ReaderProgress";
+import { PdfZoomControl } from "./PdfZoomControl";
 import {
   fetchPdfBookHighlights,
   savePdfHighlight,
@@ -47,6 +48,17 @@ const TOP_PADDING = 64; // keeps the first page clear of the header
 const MAX_FIT_WIDTH = 960; // page width at 100% on wide screens
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
+const ZOOM_STORAGE_KEY = "madaq_pdf_zoom";
+
+function readSavedZoom(): number {
+  if (typeof window === "undefined") return 1;
+  try {
+    const value = parseFloat(localStorage.getItem(ZOOM_STORAGE_KEY) || "");
+    return value >= MIN_ZOOM && value <= MAX_ZOOM ? value : 1;
+  } catch {
+    return 1;
+  }
+}
 const EMPTY_HIGHLIGHTS: Highlight[] = [];
 
 function normalizeAndMergeRects(
@@ -256,7 +268,13 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
 
   // Layout
   const [containerWidth, setContainerWidth] = useState(0);
-  const [zoom, setZoom] = useState(1);
+  // Zoom is remembered across books: it is about the reader's eyes and screen.
+  const [zoom, setZoom] = useState(readSavedZoom);
+  useEffect(() => {
+    try {
+      localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom));
+    } catch {}
+  }, [zoom]);
   const [defaultRatio, setDefaultRatio] = useState(1.414);
   const [pageRatios, setPageRatios] = useState<Record<number, number>>({});
   const [visibleRange, setVisibleRange] = useState({ first: 1, last: 1 });
@@ -534,6 +552,8 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
       if (!initialPage) showToast(`Продолжаем с ${target} страницы`);
     }
     pendingScrollPageRef.current = null;
+    const scroller = scrollRef.current;
+    if (scroller) scroller.scrollLeft = Math.max(0, (scroller.scrollWidth - scroller.clientWidth) / 2);
     updateVisiblePages();
     // Only on first layout of a loaded document.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -549,6 +569,9 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
     const el = pagesRef.current?.children[page - 1] as HTMLElement | undefined;
     if (el && scrollRef.current) {
       scrollRef.current.scrollTop = el.offsetTop + fraction * el.offsetHeight;
+      // Keep a page wider than the screen centred instead of showing its left edge.
+      const scroller = scrollRef.current;
+      scroller.scrollLeft = Math.max(0, (scroller.scrollWidth - scroller.clientWidth) / 2);
     }
     updateVisiblePages();
   }, [pageWidth, doc, updateVisiblePages]);
@@ -932,6 +955,8 @@ export function PdfReader({ book, pdfUrl, fallbackUrl, initialPage }: PdfReaderP
             <span className="pl-1 font-mono tabular-nums">/ {numPages}</span>
           </form>
         )}
+
+        <PdfZoomControl zoom={zoom} min={MIN_ZOOM} max={MAX_ZOOM} onChange={setZoom} />
 
         <button
           onClick={() => (searchOpen ? setSearchOpen(false) : openSearch())}
